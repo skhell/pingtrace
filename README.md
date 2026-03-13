@@ -2,7 +2,7 @@
 
 ![pingtrace](https://raw.githubusercontent.com/skhell/pingtrace/main/.github/media/pingtrace.png)
 
-`pingtrace` is a terminal-first CLI designed for rapid network troubleshooting, combining ping and traceroute with a clear, intuitive output enriched by DNS and ipinfo.io data..
+`pingtrace` is a terminal-first CLI designed for rapid network troubleshooting, combining ping and traceroute with a clear, intuitive output enriched by DNS and ipinfo.io data.
 
 It runs `ping` and `traceroute` in a single command against:
 
