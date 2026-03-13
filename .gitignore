@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+pingtrace-results-*.csv
+ping_*.csv
+trace_*.csv
+pingtrace/settings.json
+test/
+progress/
+pingtrace-*.tgz
