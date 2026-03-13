@@ -1,0 +1,47 @@
+{
+  "name": "pingtrace",
+  "version": "0.1.10",
+  "description": "A terminal-first CLI designed for rapid network troubleshooting, combining ping and traceroute with a clear, intuitive output enriched by DNS and ipinfo.io data.",
+  "type": "module",
+  "bin": {
+    "pingtrace": "./dist/bin/pingtrace.js"
+  },
+  "files": [
+    "dist/",
+    "changelog.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "dev": "tsx src/bin/pingtrace.ts",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "network",
+    "ping",
+    "traceroute",
+    "network engineering",
+    "network diagnostics",
+    "network troubleshooting",
+    "network tools"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "commander": "^14.0.1",
+    "conf": "^14.0.0",
+    "csv-parse": "^6.1.0",
+    "csv-stringify": "^6.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
