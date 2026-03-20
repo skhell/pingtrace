@@ -20,7 +20,7 @@ export function createCli(): Command {
       "-e, --export [path]",
       "Export operation-specific CSV files. If omitted, files are created in the current working directory.",
     )
-    .option("-v, --verbose", "Show detailed ping packet and traceroute hop tables")
+    .option("--summary", "Show compact summary output instead of detailed tables")
     .option("--no-ping", "Disable ping execution")
     .option("--no-trace", "Disable traceroute execution")
     .showHelpAfterError()
@@ -29,7 +29,7 @@ export function createCli(): Command {
       `
 Examples:
   pingtrace 8.8.8.8
-  pingtrace 8.8.8.8 -v
+  pingtrace 8.8.8.8 --summary
   pingtrace google.com,1.1.1.1 --export
   pingtrace 8.8.8.8 --export ./reports
   pingtrace 10.0.0.0/30

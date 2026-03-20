@@ -1,6 +1,6 @@
 {
   "name": "pingtrace",
-  "version": "0.1.10",
+  "version": "0.1.12",
   "description": "A terminal-first CLI designed for rapid network troubleshooting, combining ping and traceroute with a clear, intuitive output enriched by DNS and ipinfo.io data.",
   "type": "module",
   "bin": {
@@ -37,10 +37,12 @@
     "commander": "^14.0.1",
     "conf": "^14.0.0",
     "csv-parse": "^6.1.0",
-    "csv-stringify": "^6.6.0"
+    "csv-stringify": "^6.6.0",
+    "update-notifier": "^7.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
+    "@types/update-notifier": "^6.0.8",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }

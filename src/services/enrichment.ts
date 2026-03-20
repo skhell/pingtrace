@@ -1,7 +1,11 @@
 import { Resolver } from "node:dns/promises";
 import { isIP } from "node:net";
 
+import chalk from "chalk";
+
 import type { PingtraceConfig } from "../domain/types.js";
+
+const PRIVATE_DNS_TIMEOUT_MS = 5000;
 
 interface IpInfoPayload {
   city?: string;
@@ -20,9 +24,18 @@ export interface IpEnrichment {
   city: string;
   country: string;
   org: string;
+  peeringdbPolicy: string;
+  peeringdbType: string;
   privateDns: string;
   publicDns: string;
   region: string;
+}
+
+interface PeeringDbPayload {
+  data?: Array<{
+    info_type?: string;
+    policy_general?: string;
+  }>;
 }
 
 const EMPTY_ENRICHMENT: IpEnrichment = {
@@ -30,6 +43,8 @@ const EMPTY_ENRICHMENT: IpEnrichment = {
   city: "",
   country: "",
   org: "",
+  peeringdbPolicy: "",
+  peeringdbType: "",
   privateDns: "",
   publicDns: "",
   region: "",
@@ -40,7 +55,9 @@ export class EnrichmentService {
   private readonly privateResolver?: Resolver;
   private readonly publicResolver?: Resolver;
   private readonly reverseCache = new Map<string, Promise<string>>();
-  private readonly ipinfoCache = new Map<string, Promise<Omit<IpEnrichment, "privateDns" | "publicDns">>>();
+  private readonly ipinfoCache = new Map<string, Promise<Omit<IpEnrichment, "privateDns" | "publicDns" | "peeringdbType" | "peeringdbPolicy">>>();
+  private readonly peeringdbCache = new Map<string, Promise<{ peeringdbType: string; peeringdbPolicy: string }>>();
+  private privateDnsTimedOut = false;
 
   constructor(config: PingtraceConfig) {
     this.config = config;
@@ -56,8 +73,23 @@ export class EnrichmentService {
     }
   }
 
-  async enrichIp(ip: string): Promise<IpEnrichment> {
-    if (isIP(ip) === 0) {
+  hasPeeringDb(): boolean {
+    return this.config.providers.peeringdbEnabled;
+  }
+
+  hasPrivateDns(): boolean {
+    return !!this.privateResolver && !this.privateDnsTimedOut;
+  }
+
+  hasPublicDns(): boolean {
+    return !!this.publicResolver;
+  }
+
+  hasIpinfo(): boolean {
+    return !!this.config.providers.ipinfoToken;
+  }
+
+  async enrichIp(ip: string): Promise<IpEnrichment> {    if (isIP(ip) === 0) {
       return EMPTY_ENRICHMENT;
     }
 
@@ -67,8 +99,11 @@ export class EnrichmentService {
       this.fetchIpinfo(ip),
     ]);
 
+    const peeringdb = await this.fetchPeeringDb(ipinfo.asn);
+
     return {
       ...ipinfo,
+      ...peeringdb,
       privateDns,
       publicDns,
     };
@@ -87,22 +122,78 @@ export class EnrichmentService {
       return Promise.resolve("");
     }
 
+    if (scope === "private" && this.privateDnsTimedOut) {
+      return Promise.resolve("");
+    }
+
     const cacheKey = `${scope}:${ip}`;
     const cached = this.reverseCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const lookupPromise = resolver
+    const resolvePromise = resolver
       .reverse(ip)
       .then((names) => names[0] ?? "")
       .catch(() => "");
+
+    const lookupPromise =
+      scope === "private"
+        ? Promise.race([
+            resolvePromise,
+            new Promise<string>((resolve) =>
+              setTimeout(() => {
+                this.privateDnsTimedOut = true;
+                console.warn(
+                  chalk.yellow(
+                    `\n[pingtrace] Warning: Private DNS lookup timed out after ${PRIVATE_DNS_TIMEOUT_MS / 1000}s. ` +
+                      `Private DNS enrichment will be skipped for remaining targets.`,
+                  ),
+                );
+                resolve("");
+              }, PRIVATE_DNS_TIMEOUT_MS),
+            ),
+          ])
+        : resolvePromise;
 
     this.reverseCache.set(cacheKey, lookupPromise);
     return lookupPromise;
   }
 
-  private fetchIpinfo(ip: string): Promise<Omit<IpEnrichment, "privateDns" | "publicDns">> {
+  private fetchPeeringDb(asn: string): Promise<{ peeringdbType: string; peeringdbPolicy: string }> {
+    const empty = { peeringdbType: "", peeringdbPolicy: "" };
+
+    if (!this.config.providers.peeringdbEnabled || !asn) {
+      return Promise.resolve(empty);
+    }
+
+    const numericAsn = asn.replace(/^AS/i, "");
+    if (!numericAsn || !/^\d+$/.test(numericAsn)) {
+      return Promise.resolve(empty);
+    }
+
+    const cached = this.peeringdbCache.get(numericAsn);
+    if (cached) return cached;
+
+    const request = fetch(`https://www.peeringdb.com/api/net?asn=${numericAsn}&depth=0`, {
+      signal: AbortSignal.timeout(3000),
+    })
+      .then(async (response) => {
+        if (!response.ok) return empty;
+        const payload = (await response.json()) as PeeringDbPayload;
+        const net = payload.data?.[0];
+        return {
+          peeringdbType: net?.info_type ?? "",
+          peeringdbPolicy: net?.policy_general ?? "",
+        };
+      })
+      .catch(() => empty);
+
+    this.peeringdbCache.set(numericAsn, request);
+    return request;
+  }
+
+  private fetchIpinfo(ip: string): Promise<Omit<IpEnrichment, "privateDns" | "publicDns" | "peeringdbType" | "peeringdbPolicy">> {
     if (!this.config.providers.ipinfoToken || isPrivateLikeIp(ip)) {
       return Promise.resolve({
         asn: "",

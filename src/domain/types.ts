@@ -24,7 +24,7 @@ export interface RunCommandOptions {
   export?: string | boolean;
   ping: boolean;
   trace: boolean;
-  verbose?: boolean;
+  summary?: boolean;
 }
 
 export type OperationKind = "ping" | "trace";
@@ -41,6 +41,7 @@ export interface ExecutionPlan {
   targets: ResolvedTarget[];
   exportPath?: string;
   verbose?: boolean;
+  bulk?: boolean;
 }
 
 export interface ProbeResult {
@@ -52,4 +53,5 @@ export interface ProbeResult {
   notes: string;
   durationMs: number;
   command: string;
+  detailRows?: Record<string, string>[];
 }

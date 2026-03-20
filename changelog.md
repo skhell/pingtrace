@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Bulk mode: when a target set exceeds 254 hosts (larger than a /24 CIDR), pingtrace automatically switches to bulk mode. In bulk mode: streaming tables are disabled, up to 10 probes run concurrently, and a CSV is auto-exported to the current directory without requiring `--export`. A compact one-line summary per target is printed to the console as probes complete.
+
+### Changed
+- CSV export (`--export`) now writes one row per ping packet and one row per traceroute hop, with all enrichment columns included (target, DNS, org, ASN, location, net_type, policy). Previously exported only a single summary row per probe. Falls back to summary-only rows when running with `--summary`.
+
+## [0.1.12] - 2026-03-20
+
+### Added
+- PeeringDB enrichment: when `providers.peeringdbEnabled` is set to `true`, each traceroute and ping hop is enriched with network type (NSP, Content, IXP, Enterprise, etc.) and peering policy (Open, Selective, Restrictive) sourced from the PeeringDB public API. Results are cached by ASN to minimize latency. Two new columns - `net_type` and `policy` - appear in the output table when enabled.
+- Private DNS timeout guardrail: if a private DNS server does not respond within 5 seconds, a yellow warning is printed to the console and private DNS enrichment is skipped for all remaining targets, allowing pingtrace to proceed without interruption.
+
+## [0.1.11] - 2026-03-15
+
+### Added
+- Update notifier: when a newer version of `pingtrace` is available on npm, a notification is shown at startup.
+- Streaming output: ping packets and traceroute hops are now rendered row by row in real-time as they arrive, instead of waiting for the full operation to complete.
+- `--summary` flag for compact output mode when detailed tables are not needed.
+- Enrichment columns (DNS, org, ASN, location) are now shown conditionally - only when the corresponding DNS servers or ipinfo token are configured, keeping the default table width manageable.
+- When more than 8 targets are loaded (CIDR expansion or large CSV), the plan header collapses the list into a grouped count per source instead of printing every address.
+- Ping and traceroute now stream each row in true real-time by running `ping -c 1` per packet and `traceroute -f <hop> -m <hop>` per hop on Unix, bypassing the C library's full-buffering on pipes. Windows falls back to promise-chain streaming.
+
+### Changed
+- Detailed table output is now the default behavior. No flag is required to see per-packet and per-hop tables.
+- Removed the `-v` / `--verbose` flag. Users relying on `-v` should remove it from any scripts - the detailed output is now always shown by default.
+
 ## [0.1.10] - 2026-03-13
 
 ### Changed

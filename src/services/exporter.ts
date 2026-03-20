@@ -29,27 +29,29 @@ export async function exportResults(
       continue;
     }
 
-    const csv = stringify(operationResults, {
-      header: true,
-      columns: [
-        { key: "target", header: "target" },
-        { key: "source", header: "source" },
-        { key: "operation", header: "operation" },
-        { key: "status", header: "status" },
-        { key: "summary", header: "summary" },
-        { key: "notes", header: "notes" },
-        { key: "durationMs", header: "durationMs" },
-        { key: "command", header: "command" },
-      ],
-    });
+    const detailRows = operationResults.flatMap((r) => r.detailRows ?? []);
+    const hasDetail = detailRows.length > 0;
 
+    const csv = hasDetail
+      ? stringify(detailRows, { header: true })
+      : stringify(operationResults, {
+          header: true,
+          columns: [
+            { key: "target", header: "target" },
+            { key: "source", header: "source" },
+            { key: "operation", header: "operation" },
+            { key: "status", header: "status" },
+            { key: "summary", header: "summary" },
+            { key: "notes", header: "notes" },
+            { key: "durationMs", header: "durationMs" },
+            { key: "command", header: "command" },
+          ],
+        });
+
+    const rowCount = hasDetail ? detailRows.length : operationResults.length;
     const filePath = path.join(exportDirectory, `${operation}_${timestamp}.csv`);
     await writeFile(filePath, csv, "utf8");
-    exportedFiles.push({
-      operation,
-      path: filePath,
-      rowCount: operationResults.length,
-    });
+    exportedFiles.push({ operation, path: filePath, rowCount });
   }
 
   return exportedFiles;
