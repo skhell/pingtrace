@@ -2,8 +2,12 @@ import { isIP } from "node:net";
 
 import chalk from "chalk";
 
-import type { OperationKind } from "../domain/types.js";
-import { EnrichmentService } from "./enrichment.js";
+import type { EnrichmentService } from "./enrichment.js";
+
+interface ColumnDef {
+  key: string;
+  width: number;
+}
 
 type TableRow = Record<string, string>;
 
@@ -27,98 +31,243 @@ interface TraceRow {
   status: string;
 }
 
-export async function renderVerboseOperation(
-  operation: OperationKind,
-  target: string,
-  output: string,
-  enrichmentService: EnrichmentService,
-): Promise<void> {
-  console.log(chalk.cyan(`  detailed ${operation} output`));
+function buildPingColumns(service: EnrichmentService): ColumnDef[] {
+  const cols: ColumnDef[] = [
+    { key: "seq", width: 4 },
+    { key: "bytes", width: 5 },
+    { key: "reply", width: 25 },
+    { key: "ip", width: 15 },
+    { key: "ttl", width: 4 },
+    { key: "time_ms", width: 7 },
+  ];
 
-  if (operation === "ping") {
-    await renderPingTable(target, output, enrichmentService);
-    return;
+  if (service.hasPrivateDns()) {
+    cols.push({ key: "private_dns", width: 35 });
   }
 
-  await renderTraceTable(output, enrichmentService);
-}
-
-async function renderPingTable(
-  target: string,
-  output: string,
-  enrichmentService: EnrichmentService,
-): Promise<void> {
-  const parsedRows = parsePingRows(output);
-  if (parsedRows.length === 0) {
-    renderRawFallback(output);
-    return;
+  if (service.hasPublicDns()) {
+    cols.push({ key: "public_dns", width: 35 });
   }
 
-  const detailedRows = await Promise.all(
-    parsedRows.map(async (row) => {
-      const enrichment = row.ip ? await enrichmentService.enrichIp(row.ip) : undefined;
-      const isFailedRow = row.status !== "ok";
-
-      return {
-        seq: row.seq,
-        bytes: row.bytes,
-        reply: row.target || target,
-        ip: row.ip,
-        ttl: row.ttl,
-        time_ms: colorizeValue(row.timeMs, isFailedRow),
-        private_dns: enrichment?.privateDns ?? "",
-        public_dns: enrichment?.publicDns ?? "",
-        org: enrichment?.org ?? "",
-        asn: enrichment?.asn ?? "",
-        location: enrichment ? enrichmentService.formatLocation(enrichment) : "",
-        status: colorizeStatus(row.status),
-      };
-    }),
-  );
-
-  renderTable(detailedRows);
-}
-
-async function renderTraceTable(
-  output: string,
-  enrichmentService: EnrichmentService,
-): Promise<void> {
-  const parsedRows = parseTraceRows(output);
-  if (parsedRows.length === 0) {
-    renderRawFallback(output);
-    return;
+  if (service.hasIpinfo()) {
+    cols.push({ key: "org", width: 20 });
+    cols.push({ key: "asn", width: 10 });
+    cols.push({ key: "location", width: 25 });
   }
 
-  const detailedRows = await Promise.all(
-    parsedRows.map(async (row) => {
-      const enrichment = row.ip ? await enrichmentService.enrichIp(row.ip) : undefined;
-      const isFailedRow = row.status !== "ok";
+  if (service.hasPeeringDb()) {
+    cols.push({ key: "net_type", width: 12 });
+    cols.push({ key: "policy", width: 12 });
+  }
 
-      return {
-        hop: row.hop,
-        host: row.host || row.ip,
-        ip: row.ip,
-        probe_1_ms: colorizeProbeValue(row.probe1Ms, isFailedRow),
-        probe_2_ms: colorizeProbeValue(row.probe2Ms, isFailedRow),
-        probe_3_ms: colorizeProbeValue(row.probe3Ms, isFailedRow),
-        private_dns: enrichment?.privateDns ?? "",
-        public_dns: enrichment?.publicDns ?? "",
-        org: enrichment?.org ?? "",
-        asn: enrichment?.asn ?? "",
-        location: enrichment ? enrichmentService.formatLocation(enrichment) : "",
-        status: colorizeStatus(row.status),
-      };
-    }),
-  );
-
-  renderTable(detailedRows);
+  cols.push({ key: "status", width: 7 });
+  return cols;
 }
 
-function parsePingRows(output: string): PingRow[] {
-  return output
-    .split(/\r?\n/)
-    .map((line) => parsePingLine(line))
-    .filter((row): row is PingRow => row !== null);
+function buildTraceColumns(service: EnrichmentService): ColumnDef[] {
+  const cols: ColumnDef[] = [
+    { key: "hop", width: 3 },
+    { key: "host", width: 25 },
+    { key: "ip", width: 15 },
+    { key: "probe_1_ms", width: 10 },
+    { key: "probe_2_ms", width: 10 },
+    { key: "probe_3_ms", width: 10 },
+  ];
+
+  if (service.hasPrivateDns()) {
+    cols.push({ key: "private_dns", width: 35 });
+  }
+
+  if (service.hasPublicDns()) {
+    cols.push({ key: "public_dns", width: 35 });
+  }
+
+  if (service.hasIpinfo()) {
+    cols.push({ key: "org", width: 20 });
+    cols.push({ key: "asn", width: 10 });
+    cols.push({ key: "location", width: 25 });
+  }
+
+  if (service.hasPeeringDb()) {
+    cols.push({ key: "net_type", width: 12 });
+    cols.push({ key: "policy", width: 12 });
+  }
+
+  cols.push({ key: "status", width: 7 });
+  return cols;
+}
+
+class StreamingTableRenderer {
+  private headerPrinted = false;
+  private readonly widths: number[];
+  private readonly keys: string[];
+
+  constructor(
+    columns: ColumnDef[],
+    private readonly label: string,
+  ) {
+    this.widths = columns.map((c) => c.width);
+    this.keys = columns.map((c) => c.key);
+  }
+
+  private ensureHeader(): void {
+    if (this.headerPrinted) return;
+    this.headerPrinted = true;
+    console.log(chalk.cyan(`  ${this.label}`));
+    console.log(drawBorder("┌", "┬", "┐", this.widths));
+    console.log(drawRow(this.keys, this.widths));
+    console.log(drawBorder("├", "┼", "┤", this.widths));
+  }
+
+  row(values: TableRow): void {
+    this.ensureHeader();
+    console.log(drawRow(this.keys.map((k) => values[k] ?? ""), this.widths));
+  }
+
+  finish(): void {
+    if (!this.headerPrinted) return;
+    console.log(drawBorder("└", "┴", "┘", this.widths));
+  }
+}
+
+export class StreamingPingRenderer {
+  private readonly table: StreamingTableRenderer;
+  private receivedCount = 0;
+  private totalCount = 0;
+  private readonly rtts: number[] = [];
+  private readonly collectedRows: Record<string, string>[] = [];
+
+  constructor(
+    private readonly target: string,
+    private readonly enrichmentService: EnrichmentService,
+  ) {
+    this.table = new StreamingTableRenderer(
+      buildPingColumns(enrichmentService),
+      "detailed ping output",
+    );
+  }
+
+  async processLine(line: string): Promise<void> {
+    const row = parsePingLine(line);
+    if (!row) return;
+
+    this.totalCount++;
+    if (row.status === "ok" && row.timeMs) {
+      this.receivedCount++;
+      this.rtts.push(parseFloat(row.timeMs));
+    }
+
+    const enrichment = row.ip ? await this.enrichmentService.enrichIp(row.ip) : undefined;
+    const isFailedRow = row.status !== "ok";
+
+    const rawRow: Record<string, string> = {
+      target: this.target,
+      seq: row.seq,
+      bytes: row.bytes,
+      reply: row.target || this.target,
+      ip: row.ip,
+      ttl: row.ttl,
+      time_ms: row.timeMs,
+      private_dns: enrichment?.privateDns ?? "",
+      public_dns: enrichment?.publicDns ?? "",
+      org: enrichment?.org ?? "",
+      asn: enrichment?.asn ?? "",
+      location: enrichment ? this.enrichmentService.formatLocation(enrichment) : "",
+      net_type: enrichment?.peeringdbType ?? "",
+      policy: enrichment?.peeringdbPolicy ?? "",
+      status: row.status,
+    };
+
+    this.collectedRows.push(rawRow);
+    this.table.row({
+      ...rawRow,
+      time_ms: colorizeValue(row.timeMs, isFailedRow),
+      status: colorizeStatus(row.status),
+    });
+  }
+
+  finish(): void {
+    this.table.finish();
+  }
+
+  getRows(): Record<string, string>[] {
+    return this.collectedRows;
+  }
+
+  hasAnyReply(): boolean {
+    return this.receivedCount > 0;
+  }
+
+  getSummary(durationMs: number): string {
+    if (this.totalCount === 0) return `duration ${durationMs} ms`;
+    const lossPercent = (
+      ((this.totalCount - this.receivedCount) / this.totalCount) *
+      100
+    ).toFixed(1);
+    if (this.rtts.length > 0) {
+      const avg = (this.rtts.reduce((a, b) => a + b, 0) / this.rtts.length).toFixed(3);
+      return `loss ${lossPercent}%, avg ${avg} ms`;
+    }
+    return `loss ${lossPercent}%, duration ${durationMs} ms`;
+  }
+}
+
+export class StreamingTraceRenderer {
+  private readonly table: StreamingTableRenderer;
+  private readonly collectedRows: Record<string, string>[] = [];
+
+  constructor(
+    private readonly enrichmentService: EnrichmentService,
+    private readonly target: string = "",
+  ) {
+    this.table = new StreamingTableRenderer(
+      buildTraceColumns(enrichmentService),
+      "detailed trace output",
+    );
+  }
+
+  async processLine(line: string): Promise<void> {
+    const row = parseTraceLine(line);
+    if (!row) return;
+
+    const enrichment = row.ip ? await this.enrichmentService.enrichIp(row.ip) : undefined;
+    const isFailedRow = row.status !== "ok";
+
+    const rawRow: Record<string, string> = {
+      target: this.target,
+      hop: row.hop,
+      host: row.host || row.ip,
+      ip: row.ip,
+      probe_1_ms: row.probe1Ms,
+      probe_2_ms: row.probe2Ms,
+      probe_3_ms: row.probe3Ms,
+      private_dns: enrichment?.privateDns ?? "",
+      public_dns: enrichment?.publicDns ?? "",
+      org: enrichment?.org ?? "",
+      asn: enrichment?.asn ?? "",
+      location: enrichment ? this.enrichmentService.formatLocation(enrichment) : "",
+      net_type: enrichment?.peeringdbType ?? "",
+      policy: enrichment?.peeringdbPolicy ?? "",
+      status: row.status,
+    };
+
+    this.collectedRows.push(rawRow);
+    this.table.row({
+      ...rawRow,
+      probe_1_ms: colorizeProbeValue(row.probe1Ms, isFailedRow),
+      probe_2_ms: colorizeProbeValue(row.probe2Ms, isFailedRow),
+      probe_3_ms: colorizeProbeValue(row.probe3Ms, isFailedRow),
+      status: colorizeStatus(row.status),
+    });
+  }
+
+  finish(): void {
+    this.table.finish();
+  }
+
+  getRows(): Record<string, string>[] {
+    return this.collectedRows;
+  }
 }
 
 function parsePingLine(line: string): PingRow | null {
@@ -132,7 +281,6 @@ function parsePingLine(line: string): PingRow | null {
   );
   if (unixReply?.groups) {
     const endpoint = splitEndpoint(unixReply.groups.endpoint ?? "");
-
     return {
       bytes: unixReply.groups.bytes ?? "",
       ip: endpoint.ip,
@@ -187,13 +335,6 @@ function parsePingLine(line: string): PingRow | null {
   return null;
 }
 
-function parseTraceRows(output: string): TraceRow[] {
-  return output
-    .split(/\r?\n/)
-    .map((line) => parseTraceLine(line))
-    .filter((row): row is TraceRow => row !== null);
-}
-
 function parseTraceLine(line: string): TraceRow | null {
   const trimmed = line.trim();
   if (
@@ -246,7 +387,7 @@ function parseTraceLine(line: string): TraceRow | null {
     probe1Ms: probeValues[0] ?? "",
     probe2Ms: probeValues[1] ?? "",
     probe3Ms: probeValues[2] ?? "",
-    status: probeValues.every((value) => value === "*") ? "timeout" : "ok",
+    status: probeValues.every((v) => v === "*") ? "timeout" : "ok",
   };
 }
 
@@ -257,114 +398,44 @@ function splitEndpoint(input: string): { host: string; ip: string; label: string
   if (roundBrackets?.groups) {
     const host = roundBrackets.groups.host ?? "";
     const ip = roundBrackets.groups.ip ?? "";
-
-    return {
-      host,
-      ip,
-      label: host,
-    };
+    return { host, ip, label: host };
   }
 
   const squareBrackets = trimmed.match(/^(?<host>.+?)\s+\[(?<ip>[\da-fA-F:.]+)\]$/);
   if (squareBrackets?.groups) {
     const host = squareBrackets.groups.host ?? "";
     const ip = squareBrackets.groups.ip ?? "";
-
-    return {
-      host,
-      ip,
-      label: host,
-    };
+    return { host, ip, label: host };
   }
 
   if (isIP(trimmed) !== 0) {
-    return {
-      host: "",
-      ip: trimmed,
-      label: trimmed,
-    };
+    return { host: "", ip: trimmed, label: trimmed };
   }
 
-  return {
-    host: trimmed,
-    ip: "",
-    label: trimmed,
-  };
-}
-
-function renderRawFallback(output: string): void {
-  const lines = output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => ({ raw: line }));
-
-  if (lines.length === 0) {
-    renderTable([{ raw: "No detailed output captured." }]);
-    return;
-  }
-
-  renderTable(lines);
+  return { host: trimmed, ip: "", label: trimmed };
 }
 
 function colorizeStatus(status: string): string {
-  if (status === "ok") {
-    return chalk.green(status);
-  }
-
+  if (status === "ok") return chalk.green(status);
   return chalk.red(status);
 }
 
 function colorizeValue(value: string, highlight: boolean): string {
-  if (!highlight || value.length === 0) {
-    return value;
-  }
-
+  if (!highlight || value.length === 0) return value;
   return chalk.red(value);
 }
 
 function colorizeProbeValue(value: string, highlight: boolean): string {
-  if (value === "*") {
-    return chalk.red(value);
-  }
-
+  if (value === "*") return chalk.red(value);
   return colorizeValue(value, highlight);
 }
 
-function renderTable(rows: TableRow[]): void {
-  if (rows.length === 0) {
-    return;
-  }
-
-  const firstRow = rows[0];
-  if (!firstRow) {
-    return;
-  }
-
-  const columns = Object.keys(firstRow);
-  const widths = columns.map((column) =>
-    Math.max(column.length, ...rows.map((row) => visibleLength(row[column] ?? ""))),
-  );
-
-  console.log(drawBorder("┌", "┬", "┐", widths));
-  console.log(drawRow(columns, widths));
-  console.log(drawBorder("├", "┼", "┤", widths));
-
-  for (const row of rows) {
-    console.log(drawRow(columns.map((column) => row[column] ?? ""), widths));
-  }
-
-  console.log(drawBorder("└", "┴", "┘", widths));
-}
-
 function drawBorder(left: string, middle: string, right: string, widths: number[]): string {
-  return `${left}${widths.map((width) => "─".repeat(width + 2)).join(middle)}${right}`;
+  return `${left}${widths.map((w) => "─".repeat(w + 2)).join(middle)}${right}`;
 }
 
 function drawRow(values: string[], widths: number[]): string {
-  return `│ ${values
-    .map((value, index) => padAnsi(value, widths[index] ?? value.length))
-    .join(" │ ")} │`;
+  return `│ ${values.map((v, i) => padAnsi(v, widths[i] ?? visibleLength(v))).join(" │ ")} │`;
 }
 
 function padAnsi(value: string, width: number): string {

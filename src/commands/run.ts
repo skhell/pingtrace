@@ -36,18 +36,22 @@ export async function handleRunCommand(
     }
 
     const exportPath = resolveExportPath(options.export);
+    const isBulk = targets.length > BULK_THRESHOLD;
+    const effectiveExportPath = isBulk && !exportPath ? process.cwd() : exportPath;
+
     const plan: ExecutionPlan = {
       operations,
       targets,
-      ...(exportPath ? { exportPath } : {}),
-      ...(options.verbose ? { verbose: true } : {}),
+      ...(effectiveExportPath ? { exportPath: effectiveExportPath } : {}),
+      verbose: isBulk ? false : !options.summary,
+      bulk: isBulk,
     };
 
     renderPlan(plan);
 
     const results = await runProbePlan(plan);
 
-    const exportedFiles = exportPath ? await exportResults(results, exportPath) : [];
+    const exportedFiles = effectiveExportPath ? await exportResults(results, effectiveExportPath) : [];
 
     renderSummary(results, exportedFiles);
   } catch (error) {
@@ -82,24 +86,51 @@ function resolveExportPath(exportOption: string | boolean | undefined): string |
   return process.cwd();
 }
 
+const INLINE_LIST_THRESHOLD = 8;
+const BULK_THRESHOLD = 254;
+
 function renderPlan(plan: ExecutionPlan): void {
   console.log(chalk.bold("pingtrace"));
   console.log(`Targets: ${plan.targets.length}`);
   console.log(`Operations: ${plan.operations.join(", ")}`);
 
-  if (plan.exportPath) {
-    console.log(`CSV export directory: ${plan.exportPath}`);
+  if (plan.bulk) {
+    console.log(chalk.yellow(`Bulk mode: ${plan.targets.length} targets exceed /24 - running concurrently, streaming disabled.`));
+    console.log(`CSV export: ${plan.exportPath}`);
+  } else {
+    if (plan.exportPath) {
+      console.log(`CSV export directory: ${plan.exportPath}`);
+    }
+
+    if (!plan.verbose) {
+      console.log("Output: summary only");
+    }
   }
 
-  if (plan.verbose) {
-    console.log("Verbose: enabled");
-  }
-
-  for (const target of plan.targets) {
-    console.log(`- ${target.value} (${target.source})`);
+  if (plan.targets.length <= INLINE_LIST_THRESHOLD) {
+    for (const target of plan.targets) {
+      console.log(`  - ${target.value} (${target.source})`);
+    }
+  } else {
+    for (const [label, count] of groupTargets(plan.targets)) {
+      console.log(`  - ${count} target(s) from ${label}`);
+    }
   }
 
   console.log(chalk.dim("Running probes...\n"));
+}
+
+function groupTargets(targets: ExecutionPlan["targets"]): Map<string, number> {
+  const groups = new Map<string, number>();
+
+  for (const target of targets) {
+    const label = target.originalInput !== target.value
+      ? `${target.originalInput} (${target.source})`
+      : target.source;
+    groups.set(label, (groups.get(label) ?? 0) + 1);
+  }
+
+  return groups;
 }
 
 function renderSummary(
