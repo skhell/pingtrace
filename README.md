@@ -2,17 +2,31 @@
 
 ![pingtrace](https://raw.githubusercontent.com/skhell/pingtrace/main/.github/media/pingtrace.png)
 
-`pingtrace` is a terminal-first CLI designed for rapid network troubleshooting, combining ping and traceroute with a clear, intuitive output enriched by DNS, ipinfo.io, and PeeringDB data.
+[![npm version](https://img.shields.io/npm/v/pingtrace.svg)](https://www.npmjs.com/package/pingtrace)
+[![downloads](https://img.shields.io/npm/dw/pingtrace.svg)](https://www.npmjs.com/package/pingtrace)
+[![node](https://img.shields.io/node/v/pingtrace.svg)](https://www.npmjs.com/package/pingtrace)
+[![license](https://img.shields.io/npm/l/pingtrace.svg)](LICENSE)
 
-It runs `ping` and `traceroute` in a single command against:
+`pingtrace` runs **ping and traceroute** from a single command and enriches every reply and hop with DNS, organisation, ASN, geolocation, and PeeringDB data.
 
-1. **Single target**: Quick check for a single host.
-2. **Multi-target**: Separate multiple targets with commas for simultaneous checks.
-3. **Bulk loading**: Import target lists directly from CSV files.
-4. **CIDR blocks**: Automatically check against IPv4 CIDR blocks.
+It accepts:
 
-The focus is simple: fast input, clear output, and optional CSV export.
+1. **Single target** - `pingtrace 8.8.8.8`
+2. **Multi-target** - comma-separated: `pingtrace 8.8.8.8,1.1.1.1,example.com`
+3. **CSV file** - `pingtrace --file targets.csv` (first column is the target)
+4. **IPv4 CIDR** - `pingtrace 10.0.0.0/30` (auto-switches to bulk mode for /23 and larger)
 
+Output is rendered as a responsive table that adapts to your terminal width, with optional CSV export for reporting.
+
+## Why pingtrace
+
+| You want to                          | Without pingtrace                            | With pingtrace                          |
+|-----------------------------------------|----------------------------------------------|------------------------------------------|
+| Ping + traceroute one host              | Two commands, two cli outputs                    | One command, two tables exportable in csv                  |
+| Know the ASN/org behind each hop        | Manual `whois` per IP                        | Built-in via ipinfo.io                   |
+| Spot a CDN vs a transit hop             | Cross-reference PeeringDB by hand            | `net_type`/`policy` columns              |
+| Check a whole /24                       | Shell loop + manual CSV                      | `pingtrace 10.0.0.0/24` -> CSV          |
+| Resolve hops against an internal DNS    | `dig @internal.dns ...` per hop              | `dns.privateServers` config              |
 
 ## Install
 
@@ -21,68 +35,61 @@ npm install -g pingtrace
 pingtrace --help
 ```
 
-### Quick start
-
-Run both ping and trace against one host:
+Or run without installing:
 
 ```bash
-pingtrace 8.8.8.8
+npx pingtrace 8.8.8.8
 ```
 
-Run against multiple targets:
+## Quick start
+
+### Targets
 
 ```bash
-pingtrace 8.8.8.8,1.1.1.1,example.com
+pingtrace 8.8.8.8                              # single host
+pingtrace 8.8.8.8,1.1.1.1,example.com          # multiple hosts
+pingtrace 10.0.0.0/30                          # IPv4 CIDR
+pingtrace --file ./targets.csv                 # from CSV
 ```
 
-Run against a CIDR:
+CSV input format - one target per row, first column only:
+
+| target |
+| --- |
+| 8.8.8.8 |
+| 1.1.1.1 |
+| example.com |
+
+### Operations
 
 ```bash
-pingtrace 10.0.0.0/30
+pingtrace 8.8.8.8 --no-trace      # ping only
+pingtrace 8.8.8.8 --no-ping       # trace only
 ```
 
-Run from CSV:
+### Output
+
+`pingtrace` auto-fits its tables to your terminal width. When space is tight, it drops the lowest-priority enrichment columns (`policy`, `net_type`, `private_dns`, `location`, `asn`, `org`, `public_dns` in that order) and truncates long values with an ellipsis. The essentials (`seq`/`hop`, `ip`, `time`/`probe_*_ms`, `status`) are always preserved.
 
 ```bash
-pingtrace --file ./targets.csv
+pingtrace 8.8.8.8 --summary                          # one line per target
+pingtrace 8.8.8.8 --wide                             # disable auto-fit, full width
+pingtrace 8.8.8.8 --columns seq,ip,time_ms,status    # render only these columns
 ```
 
-Show compact summary output instead of full tables:
+### Export
 
 ```bash
-pingtrace 8.8.8.8 --summary
+pingtrace 8.8.8.8 --export              # CSV in current directory
+pingtrace 8.8.8.8 --export ./reports    # CSV in ./reports
 ```
 
-Export to CSV in the current working directory:
-
-```bash
-pingtrace 8.8.8.8 --export
-```
-
-Export to a specific directory:
-
-```bash
-pingtrace 8.8.8.8 --export ./reports
-```
-
-When export is enabled, `pingtrace` writes separate files per operation:
+When export is enabled, `pingtrace` writes one file per operation:
 
 - `ping_UTCdate(YYYY-MM-DD-HH-MM-SS).csv` - one row per packet, with all enrichment columns
 - `trace_UTCdate(YYYY-MM-DD-HH-MM-SS).csv` - one row per hop, with all enrichment columns
 
-When running with `--summary`, the CSV falls back to one summary row per target instead of per-packet/per-hop detail.
-
-Run only ping:
-
-```bash
-pingtrace 8.8.8.8 --no-trace
-```
-
-Run only trace:
-
-```bash
-pingtrace 8.8.8.8 --no-ping
-```
+With `--summary`, the CSV falls back to one summary row per target instead of per-packet/per-hop detail.
 
 ## Config
 
@@ -212,16 +219,36 @@ To speed up large runs further, combine with `--no-trace` (ping only) or `--no-p
 ## Command cheatsheet
 
 ```bash
-pingtrace help
+# Targets
+pingtrace <target>                                  # single
+pingtrace <t1>,<t2>,<t3>                            # multi
+pingtrace <cidr>                                    # /30 to /24 inline, /23+ bulk
+pingtrace --file <path.csv>                         # from CSV (first column)
+
+# Operations
+pingtrace <target> --no-trace                       # ping only
+pingtrace <target> --no-ping                        # trace only
+
+# Output
+pingtrace <target> --summary                        # one-line per target
+pingtrace <target> --wide                           # full-width tables
+pingtrace <target> --columns seq,ip,time_ms,status  # explicit columns
+
+# Export
+pingtrace <target> --export                         # CSV in cwd
+pingtrace <target> --export <dir>                   # CSV in dir
+
+# Help
+pingtrace --help
 pingtrace --version
-pingtrace <target-or-targets-or-cidr>
-pingtrace --file <path>
-pingtrace --summary
-pingtrace config
-pingtrace config set <key> <value>
-pingtrace config get <key>
+
+# Configuration
+pingtrace config                                    # interactive editor
 pingtrace config list
+pingtrace config get <key>
+pingtrace config set <key> <value>
 pingtrace config reset
+pingtrace config --help                             # all subcommands
 ```
 
 ## Operational notes
@@ -236,5 +263,9 @@ pingtrace config reset
 
 
 ## Feedback
-If it saves you time from a troubleshooting session, it was worth building.
-Star the project and if you want invite me for a coffe or a snack for my buddy Schnauzer Tyson.
+
+If `pingtrace` saved you time in a troubleshooting session, it was worth building.
+
+- Star the project on [GitHub](https://github.com/skhell/pingtrace)
+- Report bugs or request features in [Issues](https://github.com/skhell/pingtrace/issues)
+- Buy a coffee (or a snack for my buddy Schnauzer Tyson) if you feel like it.

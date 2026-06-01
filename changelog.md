@@ -7,11 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-29
+
+Minor version bump (rather than patch) because the CSV export schema changed shape (one row per packet/hop instead of one row per probe), which is a behavior change for any script consuming the export.
+
 ### Added
+- Responsive table rendering: ping and traceroute tables now adapt to the terminal width. Columns are dropped by priority (`policy`, `net_type`, `private_dns`, `location`, `asn`, `org`, `public_dns` in that order) and long values are truncated with an ellipsis instead of wrapping. Essentials (`seq`/`hop`, `ip`, `time`/`probe_*_ms`, `status`) are always preserved.
+- `--wide` flag to opt out of responsive sizing and render full-width columns (previous behavior). Useful when piping to a file or viewing on a wide screen.
+- `--columns <list>` flag to render only an explicit comma-separated set of columns (e.g. `--columns seq,ip,time_ms,status`). Useful for script-friendly output.
+- Polished CLI header and footer powered by `@clack/prompts` (`intro`/`outro`/`log`), with automatic plain-text fallback when running under CI (detected via `ci-info`).
 - Bulk mode: when a target set exceeds 254 hosts (larger than a /24 CIDR), pingtrace automatically switches to bulk mode. In bulk mode: streaming tables are disabled, up to 10 probes run concurrently, and a CSV is auto-exported to the current directory without requiring `--export`. A compact one-line summary per target is printed to the console as probes complete.
 
 ### Changed
 - CSV export (`--export`) now writes one row per ping packet and one row per traceroute hop, with all enrichment columns included (target, DNS, org, ASN, location, net_type, policy). Previously exported only a single summary row per probe. Falls back to summary-only rows when running with `--summary`.
+- README restructured.
+- `--help` output grouped by purpose (input -> operations -> output -> export), with clearer flag descriptions, refreshed examples covering all flags, and a pointer to `pingtrace config --help`.
 
 ## [0.1.12] - 2026-03-20
 
@@ -19,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PeeringDB enrichment: when `providers.peeringdbEnabled` is set to `true`, each traceroute and ping hop is enriched with network type (NSP, Content, IXP, Enterprise, etc.) and peering policy (Open, Selective, Restrictive) sourced from the PeeringDB public API. Results are cached by ASN to minimize latency. Two new columns - `net_type` and `policy` - appear in the output table when enabled.
 - Private DNS timeout guardrail: if a private DNS server does not respond within 5 seconds, a yellow warning is printed to the console and private DNS enrichment is skipped for all remaining targets, allowing pingtrace to proceed without interruption.
 
-## [0.1.11] - 2026-03-15
+## [0.1.11] - 2026-03-20
 
 ### Added
 - Update notifier: when a newer version of `pingtrace` is available on npm, a notification is shown at startup.

@@ -1,11 +1,26 @@
 import { isIP } from "node:net";
-
+import process from "node:process";
 import chalk from "chalk";
-
 import type { EnrichmentService } from "./enrichment.js";
 
 interface ColumnDef {
   key: string;
+  header?: string;
+  minWidth: number;
+  idealWidth: number;
+  priority: number;
+  truncatable: boolean;
+}
+
+interface FitOptions {
+  wide?: boolean;
+  columns?: string[] | undefined;
+  terminalWidth?: number;
+}
+
+interface FittedColumn {
+  key: string;
+  header: string;
   width: number;
 }
 
@@ -31,102 +46,164 @@ interface TraceRow {
   status: string;
 }
 
+const TERMINAL_WIDTH_FALLBACK = 120;
+const TERMINAL_WIDTH_FLOOR = 60;
+const ELLIPSIS = "\u2026";
+
 function buildPingColumns(service: EnrichmentService): ColumnDef[] {
   const cols: ColumnDef[] = [
-    { key: "seq", width: 4 },
-    { key: "bytes", width: 5 },
-    { key: "reply", width: 25 },
-    { key: "ip", width: 15 },
-    { key: "ttl", width: 4 },
-    { key: "time_ms", width: 7 },
+    { key: "seq", minWidth: 3, idealWidth: 4, priority: 100, truncatable: false },
+    { key: "bytes", minWidth: 4, idealWidth: 5, priority: 55, truncatable: false },
+    { key: "reply", minWidth: 10, idealWidth: 25, priority: 60, truncatable: true },
+    { key: "ip", minWidth: 11, idealWidth: 15, priority: 95, truncatable: false },
+    { key: "ttl", minWidth: 3, idealWidth: 4, priority: 70, truncatable: false },
+    { key: "time_ms", minWidth: 6, idealWidth: 7, priority: 90, truncatable: false },
   ];
 
   if (service.hasPrivateDns()) {
-    cols.push({ key: "private_dns", width: 35 });
+    cols.push({ key: "private_dns", minWidth: 12, idealWidth: 35, priority: 20, truncatable: true });
   }
-
   if (service.hasPublicDns()) {
-    cols.push({ key: "public_dns", width: 35 });
+    cols.push({ key: "public_dns", minWidth: 12, idealWidth: 35, priority: 50, truncatable: true });
   }
-
   if (service.hasIpinfo()) {
-    cols.push({ key: "org", width: 20 });
-    cols.push({ key: "asn", width: 10 });
-    cols.push({ key: "location", width: 25 });
+    cols.push({ key: "org", minWidth: 8, idealWidth: 20, priority: 40, truncatable: true });
+    cols.push({ key: "asn", minWidth: 6, idealWidth: 10, priority: 30, truncatable: true });
+    cols.push({ key: "location", minWidth: 10, idealWidth: 25, priority: 25, truncatable: true });
   }
-
   if (service.hasPeeringDb()) {
-    cols.push({ key: "net_type", width: 12 });
-    cols.push({ key: "policy", width: 12 });
+    cols.push({ key: "net_type", minWidth: 7, idealWidth: 12, priority: 15, truncatable: true });
+    cols.push({ key: "policy", minWidth: 7, idealWidth: 12, priority: 10, truncatable: true });
   }
 
-  cols.push({ key: "status", width: 7 });
+  cols.push({ key: "status", minWidth: 4, idealWidth: 7, priority: 100, truncatable: false });
   return cols;
 }
 
 function buildTraceColumns(service: EnrichmentService): ColumnDef[] {
   const cols: ColumnDef[] = [
-    { key: "hop", width: 3 },
-    { key: "host", width: 25 },
-    { key: "ip", width: 15 },
-    { key: "probe_1_ms", width: 10 },
-    { key: "probe_2_ms", width: 10 },
-    { key: "probe_3_ms", width: 10 },
+    { key: "hop", minWidth: 2, idealWidth: 3, priority: 100, truncatable: false },
+    { key: "host", minWidth: 10, idealWidth: 25, priority: 60, truncatable: true },
+    { key: "ip", minWidth: 11, idealWidth: 15, priority: 95, truncatable: false },
+    { key: "probe_1_ms", minWidth: 7, idealWidth: 10, priority: 90, truncatable: false },
+    { key: "probe_2_ms", minWidth: 7, idealWidth: 10, priority: 80, truncatable: false },
+    { key: "probe_3_ms", minWidth: 7, idealWidth: 10, priority: 75, truncatable: false },
   ];
 
   if (service.hasPrivateDns()) {
-    cols.push({ key: "private_dns", width: 35 });
+    cols.push({ key: "private_dns", minWidth: 12, idealWidth: 35, priority: 20, truncatable: true });
   }
-
   if (service.hasPublicDns()) {
-    cols.push({ key: "public_dns", width: 35 });
+    cols.push({ key: "public_dns", minWidth: 12, idealWidth: 35, priority: 50, truncatable: true });
   }
-
   if (service.hasIpinfo()) {
-    cols.push({ key: "org", width: 20 });
-    cols.push({ key: "asn", width: 10 });
-    cols.push({ key: "location", width: 25 });
+    cols.push({ key: "org", minWidth: 8, idealWidth: 20, priority: 40, truncatable: true });
+    cols.push({ key: "asn", minWidth: 6, idealWidth: 10, priority: 30, truncatable: true });
+    cols.push({ key: "location", minWidth: 10, idealWidth: 25, priority: 25, truncatable: true });
   }
-
   if (service.hasPeeringDb()) {
-    cols.push({ key: "net_type", width: 12 });
-    cols.push({ key: "policy", width: 12 });
+    cols.push({ key: "net_type", minWidth: 7, idealWidth: 12, priority: 15, truncatable: true });
+    cols.push({ key: "policy", minWidth: 7, idealWidth: 12, priority: 10, truncatable: true });
   }
 
-  cols.push({ key: "status", width: 7 });
+  cols.push({ key: "status", minWidth: 4, idealWidth: 7, priority: 100, truncatable: false });
   return cols;
+}
+
+function getTerminalWidth(): number {
+  const cols = process.stdout?.columns ?? 0;
+  if (!cols || cols < TERMINAL_WIDTH_FLOOR) return TERMINAL_WIDTH_FALLBACK;
+  return cols;
+}
+
+// "│ a │ b │" -> 4 chars overhead per column + 1 trailing.
+function frameOverhead(columnCount: number): number {
+  return columnCount * 3 + 1;
+}
+
+// Filter, drop, and shrink columns to fit the terminal width.
+export function fitColumns(all: ColumnDef[], opts: FitOptions = {}): FittedColumn[] {
+  let pool = all;
+
+  if (opts.columns && opts.columns.length > 0) {
+    const requested = new Set(opts.columns.map((c) => c.trim().toLowerCase()));
+    pool = pool.filter((c) => requested.has(c.key.toLowerCase()));
+    if (pool.length === 0) pool = all;
+  }
+
+  if (opts.wide) {
+    return pool.map((c) => ({ key: c.key, header: c.header ?? c.key, width: c.idealWidth }));
+  }
+
+  const termWidth = opts.terminalWidth ?? getTerminalWidth();
+  const working = pool.map((c) => ({ ...c }));
+
+  const totalIdeal = (): number =>
+    working.reduce((sum, c) => sum + c.idealWidth, 0) + frameOverhead(working.length);
+
+  // Iterate: prefer shrinking truncatable columns from lowest priority first;
+  // when no slack remains, drop the lowest-priority column and continue.
+  let safety = working.length * 50;
+  while (totalIdeal() > termWidth && safety-- > 0) {
+    const shrinkable = working
+      .map((c, i) => ({ col: c, i }))
+      .filter(({ col }) => col.truncatable && col.idealWidth > col.minWidth);
+
+    if (shrinkable.length > 0) {
+      shrinkable.sort((a, b) => {
+        if (a.col.priority !== b.col.priority) return a.col.priority - b.col.priority;
+        const slackA = a.col.idealWidth - a.col.minWidth;
+        const slackB = b.col.idealWidth - b.col.minWidth;
+        return slackB - slackA;
+      });
+      shrinkable[0]!.col.idealWidth -= 1;
+      continue;
+    }
+
+    if (working.length <= 1) break;
+    let dropIdx = 0;
+    for (let i = 1; i < working.length; i++) {
+      if (working[i]!.priority < working[dropIdx]!.priority) dropIdx = i;
+    }
+    working.splice(dropIdx, 1);
+  }
+
+  return working.map((c) => ({ key: c.key, header: c.header ?? c.key, width: c.idealWidth }));
 }
 
 class StreamingTableRenderer {
   private headerPrinted = false;
-  private readonly widths: number[];
-  private readonly keys: string[];
+  private readonly fitted: FittedColumn[];
 
   constructor(
     columns: ColumnDef[],
     private readonly label: string,
+    opts: FitOptions,
   ) {
-    this.widths = columns.map((c) => c.width);
-    this.keys = columns.map((c) => c.key);
+    this.fitted = fitColumns(columns, opts);
   }
 
   private ensureHeader(): void {
     if (this.headerPrinted) return;
     this.headerPrinted = true;
+    const widths = this.fitted.map((c) => c.width);
     console.log(chalk.cyan(`  ${this.label}`));
-    console.log(drawBorder("┌", "┬", "┐", this.widths));
-    console.log(drawRow(this.keys, this.widths));
-    console.log(drawBorder("├", "┼", "┤", this.widths));
+    console.log(drawBorder("\u250C", "\u252C", "\u2510", widths));
+    console.log(drawRow(this.fitted.map((c) => c.header), widths));
+    console.log(drawBorder("\u251C", "\u253C", "\u2524", widths));
   }
 
   row(values: TableRow): void {
     this.ensureHeader();
-    console.log(drawRow(this.keys.map((k) => values[k] ?? ""), this.widths));
+    const widths = this.fitted.map((c) => c.width);
+    const cells = this.fitted.map((c) => values[c.key] ?? "");
+    console.log(drawRow(cells, widths));
   }
 
   finish(): void {
     if (!this.headerPrinted) return;
-    console.log(drawBorder("└", "┴", "┘", this.widths));
+    const widths = this.fitted.map((c) => c.width);
+    console.log(drawBorder("\u2514", "\u2534", "\u2518", widths));
   }
 }
 
@@ -140,10 +217,12 @@ export class StreamingPingRenderer {
   constructor(
     private readonly target: string,
     private readonly enrichmentService: EnrichmentService,
+    opts: FitOptions = {},
   ) {
     this.table = new StreamingTableRenderer(
       buildPingColumns(enrichmentService),
       "detailed ping output",
+      opts,
     );
   }
 
@@ -219,10 +298,12 @@ export class StreamingTraceRenderer {
   constructor(
     private readonly enrichmentService: EnrichmentService,
     private readonly target: string = "",
+    opts: FitOptions = {},
   ) {
     this.table = new StreamingTableRenderer(
       buildTraceColumns(enrichmentService),
       "detailed trace output",
+      opts,
     );
   }
 
@@ -431,15 +512,49 @@ function colorizeProbeValue(value: string, highlight: boolean): string {
 }
 
 function drawBorder(left: string, middle: string, right: string, widths: number[]): string {
-  return `${left}${widths.map((w) => "─".repeat(w + 2)).join(middle)}${right}`;
+  return `${left}${widths.map((w) => "\u2500".repeat(w + 2)).join(middle)}${right}`;
 }
 
 function drawRow(values: string[], widths: number[]): string {
-  return `│ ${values.map((v, i) => padAnsi(v, widths[i] ?? visibleLength(v))).join(" │ ")} │`;
+  return `\u2502 ${values.map((v, i) => fitAnsi(v, widths[i] ?? visibleLength(v))).join(" \u2502 ")} \u2502`;
 }
 
-function padAnsi(value: string, width: number): string {
-  return `${value}${" ".repeat(Math.max(0, width - visibleLength(value)))}`;
+// Truncate to width with an ellipsis if too long, otherwise pad to width.
+function fitAnsi(value: string, width: number): string {
+  const visible = visibleLength(value);
+  if (visible <= width) {
+    return `${value}${" ".repeat(width - visible)}`;
+  }
+  if (width <= 1) {
+    return truncatePlain(value, width);
+  }
+  return `${truncatePlain(value, width - 1)}${ELLIPSIS}`;
+}
+
+// Truncate an ANSI string to a visible character budget, preserving escape codes.
+function truncatePlain(value: string, budget: number): string {
+  if (budget <= 0) return "";
+  let out = "";
+  let visible = 0;
+  const ansiPattern = /\u001B\[[0-9;]*m/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = ansiPattern.exec(value))) {
+    const chunk = value.slice(lastIndex, match.index);
+    for (const ch of chunk) {
+      if (visible >= budget) return out;
+      out += ch;
+      visible += 1;
+    }
+    out += match[0];
+    lastIndex = match.index + match[0].length;
+  }
+  for (const ch of value.slice(lastIndex)) {
+    if (visible >= budget) return out;
+    out += ch;
+    visible += 1;
+  }
+  return out;
 }
 
 function visibleLength(value: string): number {

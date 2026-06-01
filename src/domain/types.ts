@@ -25,6 +25,13 @@ export interface RunCommandOptions {
   ping: boolean;
   trace: boolean;
   summary?: boolean;
+  wide?: boolean;
+  columns?: string;
+}
+
+export interface RenderOptions {
+  wide?: boolean;
+  columns?: string[];
 }
 
 export type OperationKind = "ping" | "trace";
@@ -42,6 +49,7 @@ export interface ExecutionPlan {
   exportPath?: string;
   verbose?: boolean;
   bulk?: boolean;
+  render?: RenderOptions;
 }
 
 export interface ProbeResult {
