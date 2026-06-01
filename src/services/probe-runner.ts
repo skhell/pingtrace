@@ -5,7 +5,13 @@ import process from "node:process";
 import chalk from "chalk";
 
 import { getRuntimeConfig } from "../config/store.js";
-import type { ExecutionPlan, OperationKind, ProbeResult, ResolvedTarget } from "../domain/types.js";
+import type {
+  ExecutionPlan,
+  OperationKind,
+  ProbeResult,
+  RenderOptions,
+  ResolvedTarget,
+} from "../domain/types.js";
 import { EnrichmentService } from "./enrichment.js";
 import { StreamingPingRenderer, StreamingTraceRenderer } from "./verbose-output.js";
 
@@ -62,6 +68,7 @@ export async function runProbePlan(plan: ExecutionPlan): Promise<ProbeResult[]> 
   const config = getRuntimeConfig();
   const platform = os.platform();
   const enrichmentService = new EnrichmentService(config);
+  const render: RenderOptions = plan.render ?? {};
 
   if (plan.bulk) {
     return runBulkPlan(plan, config, platform, enrichmentService);
@@ -81,6 +88,7 @@ export async function runProbePlan(plan: ExecutionPlan): Promise<ProbeResult[]> 
         config.trace,
         plan.verbose ?? true,
         enrichmentService,
+        render,
       );
 
       renderProbeResult(result);
@@ -116,6 +124,7 @@ async function runBulkPlan(
           config.trace,
           false,
           enrichmentService,
+          plan.render ?? {},
         );
         targetResults.push(result);
       }
@@ -144,12 +153,13 @@ async function runOperation(
   traceConfig: { maxHops: number; timeoutSeconds: number; numericOnly: boolean },
   verbose: boolean,
   enrichmentService: EnrichmentService,
+  render: RenderOptions,
 ): Promise<ProbeResult> {
   if (operation === "ping") {
-    return runPing(target, platform, pingConfig, verbose, enrichmentService);
+    return runPing(target, platform, pingConfig, verbose, enrichmentService, render);
   }
 
-  return runTrace(target, platform, traceConfig, verbose, enrichmentService);
+  return runTrace(target, platform, traceConfig, verbose, enrichmentService, render);
 }
 
 async function runPing(
@@ -158,11 +168,12 @@ async function runPing(
   pingConfig: { packetSize: number; packetCount: number; timeoutSeconds: number },
   verbose: boolean,
   enrichmentService: EnrichmentService,
+  render: RenderOptions,
 ): Promise<ProbeResult> {
   const spec = createPingCommand(target.value, platform, pingConfig);
 
   if (verbose) {
-    const renderer = new StreamingPingRenderer(target.value, enrichmentService);
+    const renderer = new StreamingPingRenderer(target.value, enrichmentService, render);
 
     if (platform !== "win32") {
       // Unix: run ping -c 1 per packet to bypass C library pipe buffering.
@@ -244,12 +255,13 @@ async function runTrace(
   traceConfig: { maxHops: number; timeoutSeconds: number; numericOnly: boolean },
   verbose: boolean,
   enrichmentService: EnrichmentService,
+  render: RenderOptions,
 ): Promise<ProbeResult> {
   const candidates = createTraceCommands(target.value, platform, traceConfig);
 
   if (verbose && platform !== "win32") {
     // Unix: run traceroute one hop at a time to bypass C library pipe buffering.
-    const renderer = new StreamingTraceRenderer(enrichmentService, target.value);
+    const renderer = new StreamingTraceRenderer(enrichmentService, target.value, render);
     const result = await streamTraceHops(target.value, platform, traceConfig, renderer);
 
     if (!result.missing) {
@@ -272,7 +284,7 @@ async function runTrace(
     // traceroute not found on Unix - try tracepath with streaming fallback.
     const tracepathSpec = candidates.find((c) => c.command === "tracepath");
     if (tracepathSpec) {
-      const tracepathRenderer = new StreamingTraceRenderer(enrichmentService, target.value);
+      const tracepathRenderer = new StreamingTraceRenderer(enrichmentService, target.value, render);
       const execution = await executeCommandStreaming(tracepathSpec, (line) =>
         tracepathRenderer.processLine(line),
       );
@@ -304,7 +316,7 @@ async function runTrace(
 
     if (verbose) {
       // Windows verbose: stream via promise-chain.
-      verboseRenderer = new StreamingTraceRenderer(enrichmentService, target.value);
+      verboseRenderer = new StreamingTraceRenderer(enrichmentService, target.value, render);
       execution = await executeCommandStreaming(spec, (line) => verboseRenderer!.processLine(line));
       if (execution.missing) continue;
       verboseRenderer.finish();
