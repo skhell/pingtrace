@@ -4,7 +4,7 @@
   "description": "A terminal-first CLI designed for rapid network troubleshooting, combining ping and traceroute with a clear, intuitive output enriched by DNS and ipinfo.io data.",
   "type": "module",
   "bin": {
-    "pingtrace": "./dist/bin/pingtrace.js"
+    "pingtrace": "dist/bin/pingtrace.js"
   },
   "files": [
     "dist/",
