@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/skhell/pingtrace/v1.0.0/schema/pingtrace.schema.json",
+  "title": "Pingtrace JSON Report",
+  "description": "Schema for the JSON document emitted by `pingtrace --json`. Supports two top-level shapes: the classic ping/trace report and the MTR final report, discriminated by the `mode` field.",
+  "type": "object",
+  "required": ["$schema", "pingtraceVersion", "generatedAt", "mode"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri",
+      "description": "URI of this schema. Allows tools to validate the document without prior knowledge."
+    },
+    "pingtraceVersion": {
+      "type": "string",
+      "description": "Semantic version of the pingtrace binary that produced the document."
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp of when the document was produced."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["probe", "mtr"],
+      "description": "`probe` for ping/trace reports; `mtr` for the MTR final report."
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/ProbeReport" },
+    { "$ref": "#/$defs/MtrReport" }
+  ],
+  "$defs": {
+    "ProbeReport": {
+      "type": "object",
+      "required": ["mode", "targets", "results"],
+      "properties": {
+        "mode": { "const": "probe" },
+        "targets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Target" }
+        },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProbeResult" }
+        },
+        "exportedFiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ExportedFile" }
+        }
+      }
+    },
+    "MtrReport": {
+      "type": "object",
+      "required": ["mode", "target", "hops", "cyclesPlanned", "cyclesCompleted", "intervalMs"],
+      "properties": {
+        "mode": { "const": "mtr" },
+        "target": { "type": "string" },
+        "cyclesPlanned": {
+          "description": "Cycles requested via --cycles. `null` means unbounded (Ctrl+C).",
+          "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }]
+        },
+        "cyclesCompleted": { "type": "integer", "minimum": 0 },
+        "intervalMs": { "type": "integer", "minimum": 0 },
+        "command": {
+          "type": "string",
+          "description": "Best-effort representation of the underlying traceroute command used for hop discovery."
+        },
+        "hops": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MtrHop" }
+        }
+      }
+    },
+    "Target": {
+      "type": "object",
+      "required": ["value", "source"],
+      "properties": {
+        "value": { "type": "string" },
+        "source": {
+          "type": "string",
+          "enum": ["argument", "csv", "cidr"]
+        },
+        "originalInput": { "type": "string" }
+      }
+    },
+    "ProbeResult": {
+      "type": "object",
+      "required": ["target", "source", "operation", "status", "summary", "command", "durationMs"],
+      "properties": {
+        "target": { "type": "string" },
+        "source": { "type": "string", "enum": ["argument", "csv", "cidr"] },
+        "operation": { "type": "string", "enum": ["ping", "trace"] },
+        "status": { "type": "string", "enum": ["completed", "failed"] },
+        "summary": { "type": "string" },
+        "command": { "type": "string" },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "rows": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/PingRow" },
+              { "$ref": "#/$defs/TraceRow" }
+            ]
+          }
+        }
+      }
+    },
+    "PingRow": {
+      "type": "object",
+      "required": ["seq", "status"],
+      "properties": {
+        "seq": { "type": ["integer", "string"] },
+        "bytes": { "type": ["integer", "null"] },
+        "ip": { "type": ["string", "null"] },
+        "ttl": { "type": ["integer", "null"] },
+        "timeMs": { "type": ["number", "null"] },
+        "privateDns": { "type": ["string", "null"] },
+        "publicDns": { "type": ["string", "null"] },
+        "org": { "type": ["string", "null"] },
+        "asn": { "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] },
+        "netType": { "type": ["string", "null"] },
+        "policy": { "type": ["string", "null"] },
+        "status": { "type": "string" }
+      }
+    },
+    "TraceRow": {
+      "type": "object",
+      "required": ["hop", "status"],
+      "properties": {
+        "hop": { "type": ["integer", "string"] },
+        "host": { "type": ["string", "null"] },
+        "ip": { "type": ["string", "null"] },
+        "probe1Ms": { "type": ["number", "null"] },
+        "probe2Ms": { "type": ["number", "null"] },
+        "probe3Ms": { "type": ["number", "null"] },
+        "privateDns": { "type": ["string", "null"] },
+        "publicDns": { "type": ["string", "null"] },
+        "org": { "type": ["string", "null"] },
+        "asn": { "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] },
+        "netType": { "type": ["string", "null"] },
+        "policy": { "type": ["string", "null"] },
+        "status": { "type": "string" }
+      }
+    },
+    "MtrHop": {
+      "type": "object",
+      "required": ["hop", "sent", "lost", "lossPercent"],
+      "properties": {
+        "hop": { "type": "integer", "minimum": 1 },
+        "ip": { "type": ["string", "null"] },
+        "ips": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Additional IPs observed at this hop across cycles (load-balanced paths)."
+        },
+        "host": { "type": ["string", "null"] },
+        "sent": { "type": "integer", "minimum": 0 },
+        "lost": { "type": "integer", "minimum": 0 },
+        "lossPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "last": { "type": ["number", "null"] },
+        "best": { "type": ["number", "null"] },
+        "worst": { "type": ["number", "null"] },
+        "avg": { "type": ["number", "null"] },
+        "stdev": { "type": ["number", "null"] },
+        "privateDns": { "type": ["string", "null"] },
+        "publicDns": { "type": ["string", "null"] },
+        "org": { "type": ["string", "null"] },
+        "asn": { "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] },
+        "netType": { "type": ["string", "null"] },
+        "policy": { "type": ["string", "null"] }
+      }
+    },
+    "ExportedFile": {
+      "type": "object",
+      "required": ["operation", "path", "rowCount"],
+      "properties": {
+        "operation": { "type": "string" },
+        "path": { "type": "string" },
+        "rowCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
