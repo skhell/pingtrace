@@ -82,7 +82,7 @@ type bulkSample struct {
 // live progress bar, writes per-packet ping + per-hop trace rows
 // to CSV (same format as single-target runs), and prints a brief
 // leaderboard at the end.
-func runBulk(ctx context.Context, targets []target.Target, f *rootFlags, opts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
+func runBulk(ctx context.Context, targets []target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
 	conc := f.concurrency
 	if conc <= 0 {
 		conc = 8
@@ -102,7 +102,7 @@ func runBulk(ctx context.Context, targets []target.Target, f *rootFlags, opts re
 	}
 	close(jobs)
 
-	bar := newBulkProgress(opts.Out, total, opts.NoColor)
+	bar := newBulkProgress(pingRenderOpts.Out, total, pingRenderOpts.NoColor)
 	bar.Start()
 	defer bar.Stop()
 
@@ -167,7 +167,7 @@ func runBulk(ctx context.Context, targets []target.Target, f *rootFlags, opts re
 		return results[i].res.AvgMs < results[j].res.AvgMs
 	})
 
-	printBulkSummary(opts.Out, results, total, opts.NoColor)
+	printBulkSummary(pingRenderOpts.Out, results, total, pingRenderOpts.NoColor)
 	return nil
 }
 

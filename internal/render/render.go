@@ -24,12 +24,13 @@ import (
 
 // Options drives every rendering call. Zero-value is "auto" mode.
 type Options struct {
-	Columns []string // explicit column whitelist, snake_case or camelCase
-	Summary bool     // one line per target
-	Wide    bool     // disable auto-fit
-	NoColor bool
-	Out     io.Writer
-	Width   int // 0 = autodetect from terminal
+	Columns        []string  // explicit column whitelist (user --columns flag)
+	DefaultColumns []string  // caller-filtered default set; replaces PingAllColumns/TraceAllColumns when set
+	Summary        bool      // one line per target
+	Wide           bool      // disable auto-fit
+	NoColor        bool
+	Out            io.Writer
+	Width          int // 0 = autodetect from terminal
 }
 
 // DropPriority lists enrichment columns from lowest to highest
@@ -46,13 +47,13 @@ var mtrEssentials = []string{"hop", "ip", "loss", "snt", "last", "avg", "best", 
 // PingAllColumns is the full default ping column set in display order.
 var PingAllColumns = []string{
 	"seq", "bytes", "ip", "ttl", "time_ms",
-	"public_dns", "org", "asn", "location", "net_type", "policy", "status",
+	"public_dns", "private_dns", "org", "asn", "location", "net_type", "policy", "status",
 }
 
 // TraceAllColumns is the full default trace column set in display order.
 var TraceAllColumns = []string{
 	"hop", "host", "ip", "probe_1_ms", "probe_2_ms", "probe_3_ms",
-	"public_dns", "org", "asn", "location", "net_type", "policy", "status",
+	"public_dns", "private_dns", "org", "asn", "location", "net_type", "policy", "status",
 }
 
 func writer(opts Options) io.Writer {
@@ -146,6 +147,9 @@ func contains(s []string, v string) bool {
 	}
 	return false
 }
+
+// RemoveColumn removes one column name from a slice, returning a new slice.
+func RemoveColumn(s []string, v string) []string { return remove(s, v) }
 
 func remove(s []string, v string) []string {
 	out := make([]string, 0, len(s))

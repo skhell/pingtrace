@@ -45,6 +45,12 @@ func (r *Resolver) Enabled() bool {
 	return len(r.public) > 0 || len(r.private) > 0
 }
 
+// PublicEnabled reports whether at least one public DNS server is configured.
+func (r *Resolver) PublicEnabled() bool { return len(r.public) > 0 }
+
+// PrivateEnabled reports whether at least one private DNS server is configured.
+func (r *Resolver) PrivateEnabled() bool { return len(r.private) > 0 }
+
 // Lookup auto-routes by IP class: private IPs go to the private
 // server list, public IPs go to the public server list. Returns ""
 // when no applicable servers are configured or the lookup fails.

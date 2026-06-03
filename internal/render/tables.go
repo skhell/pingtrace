@@ -16,7 +16,11 @@ func Ping(target string, r probe.PingResult, opts Options) {
 	if opts.Summary {
 		return
 	}
-	cols := chooseColumns(PingAllColumns, pingEssentials, opts.Columns, w)
+	all := PingAllColumns
+	if len(opts.DefaultColumns) > 0 {
+		all = opts.DefaultColumns
+	}
+	cols := chooseColumns(all, pingEssentials, opts.Columns, w)
 	rows := make([][]string, 0, len(r.Packets))
 	for _, p := range r.Packets {
 		rows = append(rows, pickPingRow(p, cols))
@@ -69,7 +73,11 @@ func Trace(target string, r probe.TraceResult, opts Options) {
 	if opts.Summary {
 		return
 	}
-	cols := chooseColumns(TraceAllColumns, traceEssentials, opts.Columns, w)
+	all := TraceAllColumns
+	if len(opts.DefaultColumns) > 0 {
+		all = opts.DefaultColumns
+	}
+	cols := chooseColumns(all, traceEssentials, opts.Columns, w)
 	rows := make([][]string, 0, len(r.Hops))
 	for _, h := range r.Hops {
 		rows = append(rows, pickTraceRow(h, cols))

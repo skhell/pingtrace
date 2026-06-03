@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-06-03
+
+### Fixed
+- CSV and JSON exports now include enrichment data (DNS, org, ASN, location, PeeringDB). Enriched values were previously lost because the probe result from the stream was written to disk before enrichment was applied.
+- Private IP addresses now populate the `private_dns` column instead of `public_dns`. DNS lookups are now routed to the correct field based on IP class (RFC1918 -> `private_dns`, public -> `public_dns`) for both ping replies and traceroute hops.
+- `private_dns` column was missing from the default ping and trace table layouts and never rendered. Both tables now include it alongside `public_dns`.
+
 ## [1.0.0] - 2026-06-03
 
 ### Deprecated (NPM)

@@ -18,13 +18,13 @@ import (
 var (
 	pingWidthHints = map[string]int{
 		"seq": 4, "bytes": 5, "ip": 15, "ttl": 4, "time_ms": 8,
-		"public_dns": 22, "org": 20, "asn": 8, "location": 16,
+		"public_dns": 22, "private_dns": 22, "org": 20, "asn": 8, "location": 16,
 		"net_type": 10, "policy": 11, "status": 7,
 	}
 	traceWidthHints = map[string]int{
 		"hop": 3, "host": 22, "ip": 15,
 		"probe_1_ms": 10, "probe_2_ms": 10, "probe_3_ms": 10,
-		"public_dns": 22, "org": 20, "asn": 8, "location": 16,
+		"public_dns": 22, "private_dns": 22, "org": 20, "asn": 8, "location": 16,
 		"net_type": 10, "policy": 11, "status": 7,
 	}
 )
@@ -354,7 +354,11 @@ func PingStreamHeader(out io.Writer, target string, opts Options) *StreamTable {
 // NewPingStreamTable builds a streaming table sized for the ping
 // columns. Call after the section heading has been printed.
 func NewPingStreamTable(out io.Writer, opts Options) *StreamTable {
-	cols := chooseColumnsByWidth(PingAllColumns, pingEssentials, opts.Columns, pingWidthHints, streamWidth(opts), opts.Wide)
+	all := PingAllColumns
+	if len(opts.DefaultColumns) > 0 {
+		all = opts.DefaultColumns
+	}
+	cols := chooseColumnsByWidth(all, pingEssentials, opts.Columns, pingWidthHints, streamWidth(opts), opts.Wide)
 	widths := mapWidths(cols, pingWidthHints)
 	return NewStreamTable(out, cols, widths, opts.NoColor)
 }
@@ -382,7 +386,11 @@ func TraceStreamHeader(out io.Writer, target string, opts Options) *StreamTable 
 // traceroute columns. Call after the section heading has been
 // printed.
 func NewTraceStreamTable(out io.Writer, opts Options) *StreamTable {
-	cols := chooseColumnsByWidth(TraceAllColumns, traceEssentials, opts.Columns, traceWidthHints, streamWidth(opts), opts.Wide)
+	all := TraceAllColumns
+	if len(opts.DefaultColumns) > 0 {
+		all = opts.DefaultColumns
+	}
+	cols := chooseColumnsByWidth(all, traceEssentials, opts.Columns, traceWidthHints, streamWidth(opts), opts.Wide)
 	widths := mapWidths(cols, traceWidthHints)
 	return NewStreamTable(out, cols, widths, opts.NoColor)
 }

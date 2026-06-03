@@ -25,7 +25,7 @@ import (
 )
 
 // Version is overridden at build time via -ldflags.
-var Version = "1.0.0"
+var Version = "1.0.1"
 
 type rootFlags struct {
 	noPing   bool
@@ -268,23 +268,35 @@ func runRoot(cmd *cobra.Command, args []string, f *rootFlags) error {
 		defer finalizeWriters(cmd, csvW, jsonW)
 	}
 
-	opts := render.Options{
-		Columns: f.columns,
-		Summary: f.summary,
-		Wide:    f.wide,
-		NoColor: f.noColor || !render.IsTTY(),
-		Out:     cmd.OutOrStdout(),
-	}
-
 	if f.mtr {
+		opts := render.Options{
+			Columns: f.columns,
+			Summary: f.summary,
+			Wide:    f.wide,
+			NoColor: f.noColor || !render.IsTTY(),
+			Out:     cmd.OutOrStdout(),
+		}
 		return runMTR(ctx, targets, f, opts, csvW, jsonW, traceOpts, mtrInterval, mtrCycles)
 	}
+
 	enr := buildEnrichers()
+	hasPublicDNS := enr.dns.PublicEnabled() || enr.ipinfo.Enabled()
+	hasPrivateDNS := enr.dns.PrivateEnabled()
+	pingRenderOpts := render.Options{
+		Columns:        f.columns,
+		DefaultColumns: filterDNSColumns(render.PingAllColumns, hasPublicDNS, hasPrivateDNS),
+		Summary:        f.summary,
+		Wide:           f.wide,
+		NoColor:        f.noColor || !render.IsTTY(),
+		Out:            cmd.OutOrStdout(),
+	}
+	traceRenderOpts := pingRenderOpts
+	traceRenderOpts.DefaultColumns = filterDNSColumns(render.TraceAllColumns, hasPublicDNS, hasPrivateDNS)
 
 	if useBulk {
-		return runBulk(ctx, targets, f, opts, csvW, jsonW, pingOpts, traceOpts, enr)
+		return runBulk(ctx, targets, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr)
 	}
-	return runPingTrace(ctx, targets, f, opts, csvW, jsonW, pingOpts, traceOpts, enr)
+	return runPingTrace(ctx, targets, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr)
 }
 
 // finalizeWriters closes csvW (so file paths/row counts are stable),
@@ -361,6 +373,22 @@ func buildEnrichers() enrichers {
 	}
 }
 
+// filterDNSColumns removes public_dns / private_dns from a column list
+// based on what is actually configured, so empty columns are never shown.
+func filterDNSColumns(cols []string, hasPublicDNS, hasPrivateDNS bool) []string {
+	out := make([]string, 0, len(cols))
+	for _, c := range cols {
+		if c == "public_dns" && !hasPublicDNS {
+			continue
+		}
+		if c == "private_dns" && !hasPrivateDNS {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 // --- ping + trace ---------------------------------------------
 
 // enrichReply fills DNS + ipinfo fields on a ping reply. Each
@@ -369,8 +397,16 @@ func enrichReply(ctx context.Context, p *probe.PingReply, enr enrichers) {
 	if p.IP == "" {
 		return
 	}
-	if enr.dns.Enabled() && p.PublicDNS == "" {
-		p.PublicDNS = enr.dns.Lookup(ctx, p.IP)
+	if enr.dns.Enabled() {
+		if enrich.IsPrivateIP(p.IP) {
+			if p.PrivateDNS == "" {
+				p.PrivateDNS = enr.dns.LookupPrivate(ctx, p.IP)
+			}
+		} else {
+			if p.PublicDNS == "" {
+				p.PublicDNS = enr.dns.LookupPublic(ctx, p.IP)
+			}
+		}
 	}
 	if enr.ipinfo.Enabled() {
 		info := enr.ipinfo.Lookup(ctx, p.IP)
@@ -434,10 +470,21 @@ func enrichHop(ctx context.Context, h *probe.TraceHop, enr enrichers) {
 	if h.IP == "" {
 		return
 	}
-	if enr.dns.Enabled() && h.PublicDNS == "" {
-		h.PublicDNS = enr.dns.Lookup(ctx, h.IP)
-		if (h.Host == "" || h.Host == h.IP) && h.PublicDNS != "" {
-			h.Host = h.PublicDNS
+	if enr.dns.Enabled() {
+		if enrich.IsPrivateIP(h.IP) {
+			if h.PrivateDNS == "" {
+				h.PrivateDNS = enr.dns.LookupPrivate(ctx, h.IP)
+				if (h.Host == "" || h.Host == h.IP) && h.PrivateDNS != "" {
+					h.Host = h.PrivateDNS
+				}
+			}
+		} else {
+			if h.PublicDNS == "" {
+				h.PublicDNS = enr.dns.LookupPublic(ctx, h.IP)
+				if (h.Host == "" || h.Host == h.IP) && h.PublicDNS != "" {
+					h.Host = h.PublicDNS
+				}
+			}
 		}
 	}
 	if enr.ipinfo.Enabled() {
@@ -499,14 +546,14 @@ func enrichHop(ctx context.Context, h *probe.TraceHop, enr enrichers) {
 	}
 }
 
-func runPingTrace(ctx context.Context, targets []target.Target, f *rootFlags, opts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
+func runPingTrace(ctx context.Context, targets []target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
 	for i, t := range targets {
 		if i > 0 {
-			fmt.Fprintln(opts.Out)
-			fmt.Fprintln(opts.Out, strings.Repeat("-", 60))
+			fmt.Fprintln(pingRenderOpts.Out)
+			fmt.Fprintln(pingRenderOpts.Out, strings.Repeat("-", 60))
 		}
-		if err := pingTraceOne(ctx, t, f, opts, csvW, jsonW, pingOpts, traceOpts, enr); err != nil {
-			fmt.Fprintf(opts.Out, "%s: %v\n", t.Value, err)
+		if err := pingTraceOne(ctx, t, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr); err != nil {
+			fmt.Fprintf(pingRenderOpts.Out, "%s: %v\n", t.Value, err)
 		}
 	}
 	return nil
@@ -517,8 +564,18 @@ func runPingTrace(ctx context.Context, targets []target.Target, f *rootFlags, op
 // flushed as replies arrive), trace prints after. Trace is started
 // at t=0 in the background so its first hops are ready by the time
 // the ping section finishes.
-func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, opts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
+func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
 	target := tgt.Value
+	// For ping, further filter DNS columns based on the target IP: a private
+	// target will never populate public_dns and a public target will never
+	// populate private_dns, so hide whichever column would always be empty.
+	if enrich.IsPrivateIP(target) {
+		for _, col := range []string{"public_dns", "org", "asn", "location", "net_type", "policy"} {
+			pingRenderOpts.DefaultColumns = render.RemoveColumn(pingRenderOpts.DefaultColumns, col)
+		}
+	} else {
+		pingRenderOpts.DefaultColumns = render.RemoveColumn(pingRenderOpts.DefaultColumns, "private_dns")
+	}
 	// Kick off trace early in parallel; we'll print its output once
 	// the ping table is done.
 	type traceCollect struct {
@@ -530,7 +587,7 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, opts ren
 	if !f.noTrace {
 		evCh, doneCh, err := probe.TraceStream(ctx, target, traceOpts)
 		if err != nil {
-			fmt.Fprintf(opts.Out, "trace %s: %v\n", target, err)
+			fmt.Fprintf(traceRenderOpts.Out, "trace %s: %v\n", target, err)
 		} else {
 			tc = &traceCollect{
 				hops:    make(chan probe.TraceHop, 64),
@@ -550,22 +607,25 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, opts ren
 	if !f.noPing {
 		evCh, doneCh, err := probe.PingStream(ctx, target, pingOpts)
 		if err != nil {
-			fmt.Fprintf(opts.Out, "ping %s: %v\n", target, err)
+			fmt.Fprintf(pingRenderOpts.Out, "ping %s: %v\n", target, err)
 		} else {
 			pingStart := time.Now()
-			fmt.Fprintln(opts.Out, render.SectionHeading("PING "+target, opts.NoColor))
+			fmt.Fprintln(pingRenderOpts.Out, render.SectionHeading("PING "+target, pingRenderOpts.NoColor))
 			if f.summary {
-				prog := render.NewProgress(opts.Out, "pinging "+target+" · waiting for first reply", opts.NoColor)
+				prog := render.NewProgress(pingRenderOpts.Out, "pinging "+target+" · waiting for first reply", pingRenderOpts.NoColor)
 				prog.Start()
 				received := 0
+				var enrichedPackets []probe.PingReply
 				for ev := range evCh {
 					enrichReply(ctx, &ev.Reply, enr)
+					enrichedPackets = append(enrichedPackets, ev.Reply)
 					received++
 					prog.Update(fmt.Sprintf("ping %s · received %d", target, received))
 				}
 				res := <-doneCh
+				res.Packets = enrichedPackets
 				prog.Stop()
-				render.PingStreamFooter(opts.Out, res)
+				render.PingStreamFooter(pingRenderOpts.Out, res)
 				durMs := time.Since(pingStart).Milliseconds()
 				if csvW != nil {
 					_ = csvW.PingSummary(target, res)
@@ -574,18 +634,21 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, opts ren
 					jsonW.AppendPing(target, tgt.Source, durMs, res)
 				}
 			} else {
-				st := render.NewPingStreamTable(opts.Out, opts)
+				st := render.NewPingStreamTable(pingRenderOpts.Out, pingRenderOpts)
 				st.StartStatus("pinging " + target + " · waiting for first reply")
 				received := 0
+				var enrichedPackets []probe.PingReply
 				for ev := range evCh {
 					enrichReply(ctx, &ev.Reply, enr)
 					render.PingStreamRow(st, ev.Reply)
+					enrichedPackets = append(enrichedPackets, ev.Reply)
 					received++
 					st.SetStatus(fmt.Sprintf("ping %s · received %d", target, received))
 				}
 				res := <-doneCh
+				res.Packets = enrichedPackets
 				st.Close()
-				render.PingStreamFooter(opts.Out, res)
+				render.PingStreamFooter(pingRenderOpts.Out, res)
 				durMs := time.Since(pingStart).Milliseconds()
 				if csvW != nil {
 					_ = csvW.Ping(target, res)
@@ -599,21 +662,24 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, opts ren
 
 	if tc != nil {
 		if !f.noPing {
-			fmt.Fprintln(opts.Out)
+			fmt.Fprintln(traceRenderOpts.Out)
 		}
-		fmt.Fprintln(opts.Out, render.SectionHeading("TRACE "+target, opts.NoColor))
+		fmt.Fprintln(traceRenderOpts.Out, render.SectionHeading("TRACE "+target, traceRenderOpts.NoColor))
 		if f.summary {
-			prog := render.NewProgress(opts.Out, "tracing "+target+" · waiting for first hop", opts.NoColor)
+			prog := render.NewProgress(traceRenderOpts.Out, "tracing "+target+" · waiting for first hop", traceRenderOpts.NoColor)
 			prog.Start()
 			hopsCount := 0
+			var enrichedHops []probe.TraceHop
 			for hop := range tc.hops {
 				enrichHop(ctx, &hop, enr)
+				enrichedHops = append(enrichedHops, hop)
 				hopsCount++
 				prog.Update(fmt.Sprintf("trace %s · hop %d", target, hopsCount))
 			}
 			res := <-tc.res
+			res.Hops = enrichedHops
 			prog.Stop()
-			render.TraceStreamFooter(opts.Out, res)
+			render.TraceStreamFooter(traceRenderOpts.Out, res)
 			durMs := time.Since(tc.started).Milliseconds()
 			if csvW != nil {
 				_ = csvW.Trace(target, res)
@@ -622,18 +688,21 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, opts ren
 				jsonW.AppendTrace(target, tgt.Source, durMs, res)
 			}
 		} else {
-			st := render.NewTraceStreamTable(opts.Out, opts)
+			st := render.NewTraceStreamTable(traceRenderOpts.Out, traceRenderOpts)
 			st.StartStatus("tracing " + target + " · waiting for first hop")
 			hopsCount := 0
+			var enrichedHops []probe.TraceHop
 			for hop := range tc.hops {
 				enrichHop(ctx, &hop, enr)
 				render.TraceStreamRow(st, hop)
+				enrichedHops = append(enrichedHops, hop)
 				hopsCount++
 				st.SetStatus(fmt.Sprintf("trace %s · hop %d", target, hopsCount))
 			}
 			res := <-tc.res
+			res.Hops = enrichedHops
 			st.Close()
-			render.TraceStreamFooter(opts.Out, res)
+			render.TraceStreamFooter(traceRenderOpts.Out, res)
 			durMs := time.Since(tc.started).Milliseconds()
 			if csvW != nil {
 				_ = csvW.Trace(target, res)
