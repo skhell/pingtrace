@@ -1,0 +1,67 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pingtrace
+    main: ./cmd/pingtrace
+    binary: pingtrace
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/skhell/pingtrace/cmd/pingtrace/cli.Version={{.Version}}
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+
+nfpms:
+  - id: packages
+    package_name: pingtrace
+    vendor: Tia Zanella
+    homepage: https://github.com/skhell/pingtrace
+    maintainer: Tia Zanella <tia@skhell.com>
+    description: Cross-platform ping + traceroute + MTR in one command.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: skhell
+    name: pingtrace
+  draft: false
+  prerelease: auto
