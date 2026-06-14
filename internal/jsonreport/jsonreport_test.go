@@ -99,7 +99,7 @@ func TestWriterEmitsMtrReportPerTarget(t *testing.T) {
 		Target: "1.1.1.1", Cycles: 2,
 		Hops: []probe.MTRStat{{Hop: 1, IP: "10.0.0.1", Snt: 2, LossPc: 0, Last: 1.1, Avg: 1.0, Best: 0.9, Wrst: 1.1, StDev: 0.1}},
 	})
-	w.AppendMTR("8.8.8.8", &cycles, 1000, "traceroute", probe.MTRResult{Target: "8.8.8.8", Cycles: 2})
+	w.AppendMTR("1.1.1.1", &cycles, 1000, "traceroute", probe.MTRResult{Target: "1.1.1.1", Cycles: 2})
 	paths, err := w.Close(nil)
 	if err != nil {
 		t.Fatal(err)

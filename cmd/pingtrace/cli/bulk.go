@@ -71,6 +71,23 @@ func cidrFilenameTag(targets []target.Target) string {
 	return strings.Join(order, "+")
 }
 
+// filenameTarget returns a short human-readable description of the
+// target set for use in export filenames.
+//   - Single target  -> the target value itself ("1.1.1.1", "google.com")
+//   - CIDR(s)        -> sanitized CIDR notation ("10.0.0.0_24")
+//   - Multiple plain -> first value + count ("1.1.1.1+2more")
+func filenameTarget(targets []target.Target) string {
+	tag := cidrFilenameTag(targets)
+	if tag != "" {
+		return tag
+	}
+	if len(targets) == 1 {
+		return targets[0].Value
+	}
+	extra := len(targets) - 1
+	return fmt.Sprintf("%s+%dmore", targets[0].Value, extra)
+}
+
 // bulkSample holds the result of one worker's probe.
 type bulkSample struct {
 	target string

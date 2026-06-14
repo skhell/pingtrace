@@ -58,6 +58,7 @@ func TraceStream(ctx context.Context, target string, opts TraceOptions) (<-chan 
 	events := make(chan TraceEvent, 4)
 	done := make(chan TraceResult, 1)
 	full := append([]string{bin}, args...)
+	srcIP := OutboundIP(target)
 
 	go func() {
 		defer close(events)
@@ -69,6 +70,8 @@ func TraceStream(ctx context.Context, target string, opts TraceOptions) (<-chan 
 			if !ok {
 				continue
 			}
+			hop.Source = srcIP
+			hop.Target = target
 			res.Hops = append(res.Hops, hop)
 			select {
 			case events <- TraceEvent{Hop: hop}:

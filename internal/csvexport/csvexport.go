@@ -25,18 +25,22 @@ import (
 // serializes writes so the bulk-mode worker pool can call us from
 // many goroutines without corrupting rows.
 type Writer struct {
-	dir   string
-	stamp string
-	tag   string // optional filename infix (e.g. sanitized CIDR)
-	files map[string]*csvFile
-	mu    sync.Mutex
+	dir     string
+	stamp   string
+	tag     string // legacy infix, superseded by src/to when both are set
+	src     string // local outbound IP
+	to      string // sanitized target description
+	compact bool   // omit all-empty columns
+	files   map[string]*csvFile
+	mu      sync.Mutex
 }
 
 type csvFile struct {
-	f        *os.File
-	w        *csv.Writer
-	headers  []string
-	rowCount int
+	f         *os.File
+	w         *csv.Writer
+	headers   []string
+	rowCount  int
+	activeIdx []int // non-nil in compact mode: indices into the full header slice
 }
 
 // New creates the export directory (if missing) and stamps every
@@ -92,13 +96,40 @@ func (w *Writer) Files() []FileInfo {
 	return out
 }
 
+// openCompact is like open but determines the active column set from
+// rows on the first call, then reuses that set for the lifetime of
+// the file. Caller must hold w.mu.
+func (w *Writer) openCompact(op string, allHeaders []string, rows [][]string) (*csvFile, error) {
+	if cf, ok := w.files[op]; ok {
+		return cf, nil
+	}
+	idx := nonEmptyIdx(rows)
+	if idx == nil {
+		idx = make([]int, len(allHeaders))
+		for i := range idx {
+			idx[i] = i
+		}
+	}
+	cf, err := w.open(op, filterHeaders(allHeaders, idx))
+	if err != nil {
+		return nil, err
+	}
+	cf.activeIdx = idx
+	return cf, nil
+}
+
 func (w *Writer) open(op string, headers []string) (*csvFile, error) {
 	if cf, ok := w.files[op]; ok {
 		return cf, nil
 	}
-	name := fmt.Sprintf("%s_UTC%s.csv", op, w.stamp)
-	if w.tag != "" {
+	var name string
+	switch {
+	case w.src != "" && w.to != "":
+		name = fmt.Sprintf("%s_from_%s_to_%s_UTC%s.csv", op, w.src, w.to, w.stamp)
+	case w.tag != "":
 		name = fmt.Sprintf("%s_%s_UTC%s.csv", op, w.tag, w.stamp)
+	default:
+		name = fmt.Sprintf("%s_UTC%s.csv", op, w.stamp)
 	}
 	path := filepath.Join(w.dir, name)
 	f, err := os.Create(path)
@@ -113,6 +144,29 @@ func (w *Writer) open(op string, headers []string) (*csvFile, error) {
 	cf := &csvFile{f: f, w: cw, headers: headers}
 	w.files[op] = cf
 	return cf, nil
+}
+
+// SetFromTo sets the source IP and target description used in filenames.
+// When both are non-empty the filename becomes:
+//
+//	<op>_from_<src>_to_<to>_UTC<stamp>.csv
+//
+// Call before the first write.
+func (w *Writer) SetFromTo(src, to string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.src = sanitizeTag(src)
+	w.to = sanitizeTag(to)
+}
+
+// SetCompact enables compact mode: columns that are entirely empty
+// across all rows of a target are omitted from the CSV output.
+// The column set is locked in on the first write to each file and
+// held for all subsequent targets in the same run.
+func (w *Writer) SetCompact(v bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.compact = v
 }
 
 // SetTag adds a sanitized infix between the operation name and the
@@ -150,14 +204,58 @@ func sanitizeTag(s string) string {
 	return out
 }
 
+// --- compact helpers -------------------------------------------
+
+// nonEmptyIdx returns the indices of columns that have at least one
+// non-empty value across all rows.
+func nonEmptyIdx(rows [][]string) []int {
+	if len(rows) == 0 {
+		return nil
+	}
+	width := len(rows[0])
+	seen := make([]bool, width)
+	for _, r := range rows {
+		for i, v := range r {
+			if i < width && v != "" {
+				seen[i] = true
+			}
+		}
+	}
+	idx := make([]int, 0, width)
+	for i, ok := range seen {
+		if ok {
+			idx = append(idx, i)
+		}
+	}
+	return idx
+}
+
+func filterHeaders(all []string, idx []int) []string {
+	out := make([]string, len(idx))
+	for i, j := range idx {
+		out[i] = all[j]
+	}
+	return out
+}
+
+func filterRow(row []string, idx []int) []string {
+	out := make([]string, len(idx))
+	for i, j := range idx {
+		if j < len(row) {
+			out[i] = row[j]
+		}
+	}
+	return out
+}
+
 // --- ping ------------------------------------------------------
 
 // pingHeaders mirrors the CLI ping columns plus every enrichment
 // field from ipinfo.io and PeeringDB. No truncation: CSV is for
 // downstream analysis.
 var pingHeaders = []string{
-	"target", "seq", "bytes", "ip", "ttl", "time_ms",
-	"public_dns", "private_dns", "hostname",
+	"seq", "bytes", "source", "target", "ttl", "time_ms",
+	"public_dns", "private_dns", "ipinfo_hostname",
 	"org", "asn", "location", "city", "region", "country", "loc",
 	"net_type", "policy", "pdb_name", "traffic",
 	"prefixes_v4", "prefixes_v6", "ixp_count",
@@ -168,25 +266,49 @@ var pingSummaryHeaders = []string{
 	"target", "sent", "received", "loss_pct", "avg_ms", "min_ms", "max_ms",
 }
 
+func buildPingRow(p probe.PingReply, fallbackTarget string) []string {
+	tgt := p.Target
+	if tgt == "" {
+		tgt = fallbackTarget
+	}
+	return []string{
+		strconv.Itoa(p.Seq), strconv.Itoa(p.Bytes),
+		p.Source, tgt, strconv.Itoa(p.TTL), fmt.Sprintf("%.3f", p.TimeMs),
+		p.PublicDNS, p.PrivateDNS, p.Hostname,
+		p.Org, p.ASN, p.Location, p.City, p.Region, p.Country, p.Loc,
+		p.NetType, p.Policy, p.PdbName, p.Traffic,
+		intOrEmpty(p.Prefixes4), intOrEmpty(p.Prefixes6), intOrEmpty(p.IXPCount),
+		p.Status,
+	}
+}
+
 // Ping writes per-packet rows for one target.
 func (w *Writer) Ping(target string, r probe.PingResult) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	cf, err := w.open("ping", pingHeaders)
+
+	rows := make([][]string, 0, len(r.Packets))
+	for _, p := range r.Packets {
+		rows = append(rows, buildPingRow(p, target))
+	}
+
+	var cf *csvFile
+	var err error
+	if w.compact {
+		cf, err = w.openCompact("ping", pingHeaders, rows)
+	} else {
+		cf, err = w.open("ping", pingHeaders)
+	}
 	if err != nil {
 		return err
 	}
-	for _, p := range r.Packets {
-		row := []string{
-			target, strconv.Itoa(p.Seq), strconv.Itoa(p.Bytes),
-			p.IP, strconv.Itoa(p.TTL), fmt.Sprintf("%.3f", p.TimeMs),
-			p.PublicDNS, p.PrivateDNS, p.Hostname,
-			p.Org, p.ASN, p.Location, p.City, p.Region, p.Country, p.Loc,
-			p.NetType, p.Policy, p.PdbName, p.Traffic,
-			intOrEmpty(p.Prefixes4), intOrEmpty(p.Prefixes6), intOrEmpty(p.IXPCount),
-			p.Status,
+
+	for _, row := range rows {
+		out := row
+		if cf.activeIdx != nil {
+			out = filterRow(row, cf.activeIdx)
 		}
-		if err := cf.w.Write(row); err != nil {
+		if err := cf.w.Write(out); err != nil {
 			return err
 		}
 		cf.rowCount++
@@ -225,34 +347,58 @@ func intOrEmpty(n int) string {
 // --- trace -----------------------------------------------------
 
 var traceHeaders = []string{
-	"target", "hop", "host", "ip",
+	"hop", "source", "target", "hostname", "host_ip",
 	"probe_1_ms", "probe_2_ms", "probe_3_ms",
-	"public_dns", "private_dns", "hostname",
+	"public_dns", "private_dns", "ipinfo_hostname",
 	"org", "asn", "location", "city", "region", "country", "loc",
 	"net_type", "policy", "pdb_name", "traffic",
 	"prefixes_v4", "prefixes_v6", "ixp_count",
 	"status",
 }
 
+func buildTraceRow(h probe.TraceHop, fallbackTarget string) []string {
+	tgt := h.Target
+	if tgt == "" {
+		tgt = fallbackTarget
+	}
+	return []string{
+		strconv.Itoa(h.Hop), h.Source, tgt, h.Host, h.IP,
+		fmtProbe(h.Probe1Ms), fmtProbe(h.Probe2Ms), fmtProbe(h.Probe3Ms),
+		h.PublicDNS, h.PrivateDNS, h.Hostname,
+		h.Org, h.ASN, h.Location, h.City, h.Region, h.Country, h.Loc,
+		h.NetType, h.Policy, h.PdbName, h.Traffic,
+		intOrEmpty(h.Prefixes4), intOrEmpty(h.Prefixes6), intOrEmpty(h.IXPCount),
+		h.Status,
+	}
+}
+
 // Trace writes per-hop rows for one target.
 func (w *Writer) Trace(target string, r probe.TraceResult) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	cf, err := w.open("trace", traceHeaders)
+
+	rows := make([][]string, 0, len(r.Hops))
+	for _, h := range r.Hops {
+		rows = append(rows, buildTraceRow(h, target))
+	}
+
+	var cf *csvFile
+	var err error
+	if w.compact {
+		cf, err = w.openCompact("trace", traceHeaders, rows)
+	} else {
+		cf, err = w.open("trace", traceHeaders)
+	}
 	if err != nil {
 		return err
 	}
-	for _, h := range r.Hops {
-		row := []string{
-			target, strconv.Itoa(h.Hop), h.Host, h.IP,
-			fmtProbe(h.Probe1Ms), fmtProbe(h.Probe2Ms), fmtProbe(h.Probe3Ms),
-			h.PublicDNS, h.PrivateDNS, h.Hostname,
-			h.Org, h.ASN, h.Location, h.City, h.Region, h.Country, h.Loc,
-			h.NetType, h.Policy, h.PdbName, h.Traffic,
-			intOrEmpty(h.Prefixes4), intOrEmpty(h.Prefixes6), intOrEmpty(h.IXPCount),
-			h.Status,
+
+	for _, row := range rows {
+		out := row
+		if cf.activeIdx != nil {
+			out = filterRow(row, cf.activeIdx)
 		}
-		if err := cf.w.Write(row); err != nil {
+		if err := cf.w.Write(out); err != nil {
 			return err
 		}
 		cf.rowCount++

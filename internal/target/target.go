@@ -2,8 +2,8 @@
 // de-duplicated, order-preserving list of probe targets.
 //
 // Accepted forms:
-//   - bare host or IP: "8.8.8.8", "example.com", "2606:4700:4700::1111"
-//   - comma list: "8.8.8.8,1.1.1.1,example.com"
+//   - bare host or IP: "1.1.1.1", "example.com", "2606:4700:4700::1111"
+//   - comma list: "1.1.1.1,1.1.1.1,example.com"
 //   - IPv4 CIDR: "10.0.0.0/30" (expanded to host addresses)
 //   - --file <path>: CSV with the target in the first column; lines
 //     beginning with "#" and empty lines are ignored. The first column

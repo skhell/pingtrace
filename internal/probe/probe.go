@@ -19,6 +19,8 @@ type PingResult struct {
 type PingReply struct {
 	Seq    int     `json:"seq"`
 	Bytes  int     `json:"bytes"`
+	Source string  `json:"source"` // local outbound IP
+	Target string  `json:"target"` // probe target (host or IP)
 	IP     string  `json:"ip"`
 	TTL    int     `json:"ttl"`
 	TimeMs float64 `json:"timeMs"`
@@ -55,6 +57,8 @@ type TraceResult struct {
 // TraceHop is one row of traceroute output (one TTL).
 type TraceHop struct {
 	Hop      int     `json:"hop"`
+	Source   string  `json:"source"` // local outbound IP
+	Target   string  `json:"target"` // probe target (host or IP)
 	IP       string  `json:"ip"`
 	Host     string  `json:"host,omitempty"`
 	Probe1Ms float64 `json:"probe1Ms"`

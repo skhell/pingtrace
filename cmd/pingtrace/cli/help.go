@@ -43,10 +43,11 @@ var flagGroups = map[string]string{
 	"no-color": "Output",
 
 	// Export
-	"export":      "Export",
-	"json":        "Export",
-	"tables":      "Bulk mode",
-	"concurrency": "Bulk mode",
+	"export":         "Export",
+	"json":           "Export",
+	"compact-export": "Export",
+	"tables":         "Bulk mode",
+	"concurrency":    "Bulk mode",
 
 	// Misc (auto-added by cobra)
 	"help":    "Misc",
@@ -68,17 +69,18 @@ var groupOrder = []string{
 var helpExamples = []struct {
 	Cmd, Desc string
 }{
-	{"pingtrace 8.8.8.8", "ping + traceroute, single host"},
-	{"pingtrace 8.8.8.8,1.1.1.1", "multiple hosts (comma-separated)"},
+	{"pingtrace 1.1.1.1", "ping + traceroute, single host"},
+	{"pingtrace 1.1.1.1,1.1.1.1", "multiple hosts (comma-separated)"},
 	{"pingtrace 10.0.0.0/30", "expand a small IPv4 CIDR"},
 	{"pingtrace --file ./targets.csv", "read targets from CSV (first column)"},
 	{"pingtrace 1.1.1.1 --mtr", "live MTR until Ctrl+C"},
 	{"pingtrace 1.1.1.1 -m --cycles 10 --interval 2", "bounded MTR: 10 cycles, 2 s apart"},
-	{"pingtrace 8.8.8.8 --no-trace", "ping only"},
-	{"pingtrace 8.8.8.8 --no-ping", "trace only"},
-	{"pingtrace 8.8.8.8 --export ./reports", "write CSV report to ./reports"},
-	{"pingtrace 8.8.8.8 --export ./reports --json", "write CSV + JSON report (schema-validated) to ./reports"},
-	{"pingtrace 8.8.8.8 --columns seq,ip,time_ms,status", "render only the listed columns"},
+	{"pingtrace 1.1.1.1 --no-trace", "ping only"},
+	{"pingtrace 1.1.1.1 --no-ping", "trace only"},
+	{"pingtrace 1.1.1.1 --export ./reports", "write CSV report to ./reports"},
+	{"pingtrace 1.1.1.1 --export ./reports --json", "write CSV + JSON report (schema-validated) to ./reports"},
+	{"pingtrace 1.1.1.1 --export ./reports --compact-export", "CSV with no empty columns (e.g. skips PeeringDB columns when not configured)"},
+	{"pingtrace 1.1.1.1 --columns seq,ip,time_ms,status", "render only the listed columns"},
 	{"pingtrace config", "interactive TUI to edit defaults & API tokens"},
 	{"pingtrace 1.1.1.1 --summary", "skip the table; print only the one-line summary"},
 	{"pingtrace completion zsh > _pingtrace", "generate a zsh completion script"},

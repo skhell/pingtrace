@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/skhell/pingtrace/v1.0.0/schema/pingtrace.schema.json",
+  "$id": "https://raw.githubusercontent.com/skhell/pingtrace/v1.1.0/schema/pingtrace.schema.json",
   "title": "Pingtrace JSON Report",
   "description": "Schema for the JSON document emitted by `pingtrace --json`. Supports two top-level shapes: the classic ping/trace report and the MTR final report, discriminated by the `mode` field.",
   "type": "object",
@@ -112,7 +112,8 @@
       "properties": {
         "seq": { "type": ["integer", "string"] },
         "bytes": { "type": ["integer", "null"] },
-        "ip": { "type": ["string", "null"] },
+        "source": { "type": ["string", "null"], "description": "Local outbound IP of the machine running pingtrace." },
+        "target": { "type": ["string", "null"], "description": "Hostname or IP passed on the command line." },
         "ttl": { "type": ["integer", "null"] },
         "timeMs": { "type": ["number", "null"] },
         "privateDns": { "type": ["string", "null"] },
@@ -130,8 +131,10 @@
       "required": ["hop", "status"],
       "properties": {
         "hop": { "type": ["integer", "string"] },
-        "host": { "type": ["string", "null"] },
-        "ip": { "type": ["string", "null"] },
+        "source": { "type": ["string", "null"], "description": "Local outbound IP of the machine running pingtrace." },
+        "target": { "type": ["string", "null"], "description": "Hostname or IP passed on the command line." },
+        "hostname": { "type": ["string", "null"], "description": "Reverse DNS hostname reported by traceroute for this hop." },
+        "hostIp": { "type": ["string", "null"], "description": "IP address of this hop's router." },
         "probe1Ms": { "type": ["number", "null"] },
         "probe2Ms": { "type": ["number", "null"] },
         "probe3Ms": { "type": ["number", "null"] },

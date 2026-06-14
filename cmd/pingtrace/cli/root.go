@@ -25,7 +25,7 @@ import (
 )
 
 // Version is overridden at build time via -ldflags.
-var Version = "1.0.1"
+var Version = "1.1.0"
 
 type rootFlags struct {
 	noPing   bool
@@ -49,9 +49,10 @@ type rootFlags struct {
 	wide    bool
 	noColor bool
 
-	exportDir string
-	exportSet bool
-	jsonOut   bool
+	exportDir     string
+	exportSet     bool
+	jsonOut       bool
+	compactExport bool
 
 	file string
 
@@ -110,6 +111,7 @@ func newRootCmd() *cobra.Command {
 	root.Flags().StringVar(&f.exportDir, "export", "", "Write CSV files to DIR. Use --export alone for current dir, --export=DIR or --export DIR for a path.")
 	root.Flags().Lookup("export").NoOptDefVal = "."
 	root.Flags().BoolVar(&f.jsonOut, "json", false, "Also write a JSON report (validates against schema/pingtrace.schema.json). Honors --export DIR; defaults to current dir.")
+	root.Flags().BoolVar(&f.compactExport, "compact-export", false, "Omit columns that are entirely empty from CSV export (e.g. PeeringDB columns when PeeringDB is not configured).")
 
 	root.Flags().StringVar(&f.file, "file", "", "Read targets from a CSV file (first column = target).")
 
@@ -234,13 +236,16 @@ func runRoot(cmd *cobra.Command, args []string, f *rootFlags) error {
 	if jsonDir == "" {
 		jsonDir = "."
 	}
+	srcIP := probe.OutboundIP(targets[0].Value)
+	toLabel := filenameTarget(targets)
 	if cmd.Flags().Changed("export") {
 		f.exportSet = true
 		csvW, err = csvexport.New(f.exportDir)
 		if err != nil {
 			return err
 		}
-		csvW.SetTag(cidrFilenameTag(targets))
+		csvW.SetFromTo(srcIP, toLabel)
+		csvW.SetCompact(f.compactExport)
 	} else if useBulk {
 		// Bulk mode auto-exports CSV to CWD even without --export, so the
 		// user always walks away with a record of large fan-outs.
@@ -248,13 +253,15 @@ func runRoot(cmd *cobra.Command, args []string, f *rootFlags) error {
 		if err != nil {
 			return err
 		}
-		csvW.SetTag(cidrFilenameTag(targets))
+		csvW.SetFromTo(srcIP, toLabel)
+		csvW.SetCompact(f.compactExport)
 	}
 	if f.jsonOut {
 		jsonW, err = jsonreport.New(jsonDir, Version)
 		if err != nil {
 			return err
 		}
+		jsonW.SetFromTo(srcIP, toLabel)
 		jsonW.SetTag(cidrFilenameTag(targets))
 		for _, t := range targets {
 			jsonW.AddTarget(jsonreport.Target{

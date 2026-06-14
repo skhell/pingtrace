@@ -36,6 +36,10 @@ func pickPingRow(p probe.PingReply, cols []string) []string {
 			row[i] = strconv.Itoa(p.Seq)
 		case "bytes":
 			row[i] = strconv.Itoa(p.Bytes)
+		case "source":
+			row[i] = p.Source
+		case "target":
+			row[i] = p.Target
 		case "ip":
 			row[i] = p.IP
 		case "ttl":
@@ -91,14 +95,18 @@ func pickTraceRow(h probe.TraceHop, cols []string) []string {
 		switch c {
 		case "hop":
 			row[i] = strconv.Itoa(h.Hop)
-		case "ip":
+		case "source":
+			row[i] = h.Source
+		case "target":
+			row[i] = h.Target
+		case "hostname":
+			row[i] = h.Host
+		case "host_ip":
 			if h.IP == "" {
 				row[i] = "*"
 			} else {
 				row[i] = h.IP
 			}
-		case "host":
-			row[i] = h.Host
 		case "probe_1_ms":
 			row[i] = formatProbe(h.Probe1Ms, h.Status)
 		case "probe_2_ms":

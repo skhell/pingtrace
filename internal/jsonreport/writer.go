@@ -25,6 +25,8 @@ type Writer struct {
 	dir     string
 	stamp   string
 	tag     string
+	src     string // local outbound IP, set via SetFromTo
+	to      string // sanitized target description, set via SetFromTo
 	version string
 
 	mu sync.Mutex
@@ -54,6 +56,19 @@ func (w *Writer) SetTag(tag string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.tag = sanitizeTag(tag)
+}
+
+// SetFromTo sets the source IP and target description used in filenames.
+// When both are non-empty the filename becomes:
+//
+//	probe_from_<src>_to_<to>_UTC<stamp>.json
+//
+// Call before Close.
+func (w *Writer) SetFromTo(src, to string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.src = sanitizeTag(src)
+	w.to = sanitizeTag(to)
 }
 
 // AddTarget records a target in the probe-mode document. Idempotent per value.
@@ -129,9 +144,14 @@ func (w *Writer) Close(exported []ExportedFile) ([]string, error) {
 }
 
 func (w *Writer) writeFile(name string, doc any) (string, error) {
-	filename := fmt.Sprintf("%s_UTC%s.json", name, w.stamp)
-	if w.tag != "" {
+	var filename string
+	switch {
+	case w.src != "" && w.to != "":
+		filename = fmt.Sprintf("%s_from_%s_to_%s_UTC%s.json", name, w.src, w.to, w.stamp)
+	case w.tag != "":
 		filename = fmt.Sprintf("%s_%s_UTC%s.json", name, w.tag, w.stamp)
+	default:
+		filename = fmt.Sprintf("%s_UTC%s.json", name, w.stamp)
 	}
 	path := filepath.Join(w.dir, filename)
 	data, err := json.MarshalIndent(doc, "", "  ")

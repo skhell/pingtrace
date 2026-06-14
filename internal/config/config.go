@@ -121,7 +121,7 @@ func Meta() map[string]KeyMeta {
 		"dns.public": {
 			Category:    "DNS resolution",
 			Description: "Comma-separated DNS servers for routable IPs.",
-			Hint:        "Example: 1.1.1.1,8.8.8.8 (port 53 assumed if omitted).",
+			Hint:        "Example: 1.1.1.1,1.1.1.1 (port 53 assumed if omitted).",
 		},
 		"dns.private": {
 			Category:    "DNS resolution",

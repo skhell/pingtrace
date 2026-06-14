@@ -1,6 +1,8 @@
 *.log
 .DS_Store
 *.csv
+probe_*.json
+mtr_*.json
 pingtrace/settings.json
 test/
 progress/

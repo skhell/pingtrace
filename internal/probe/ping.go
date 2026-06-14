@@ -112,6 +112,7 @@ func PingStream(ctx context.Context, target string, opts PingOptions) (<-chan Pi
 	events := make(chan PingEvent, 4)
 	done := make(chan PingResult, 1)
 	full := append([]string{bin}, args...)
+	srcIP := OutboundIP(target)
 
 	go func() {
 		defer close(events)
@@ -127,6 +128,8 @@ func PingStream(ctx context.Context, target string, opts PingOptions) (<-chan Pi
 			if !ok {
 				continue
 			}
+			reply.Source = srcIP
+			reply.Target = target
 			seq++
 			res.Packets = append(res.Packets, reply)
 			res.Received++

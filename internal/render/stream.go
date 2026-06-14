@@ -17,12 +17,12 @@ import (
 
 var (
 	pingWidthHints = map[string]int{
-		"seq": 4, "bytes": 5, "ip": 15, "ttl": 4, "time_ms": 8,
+		"seq": 4, "bytes": 5, "source": 15, "target": 22, "ttl": 4, "time_ms": 8,
 		"public_dns": 22, "private_dns": 22, "org": 20, "asn": 8, "location": 16,
 		"net_type": 10, "policy": 11, "status": 7,
 	}
 	traceWidthHints = map[string]int{
-		"hop": 3, "host": 22, "ip": 15,
+		"hop": 3, "source": 15, "target": 22, "hostname": 22, "host_ip": 15,
 		"probe_1_ms": 10, "probe_2_ms": 10, "probe_3_ms": 10,
 		"public_dns": 22, "private_dns": 22, "org": 20, "asn": 8, "location": 16,
 		"net_type": 10, "policy": 11, "status": 7,

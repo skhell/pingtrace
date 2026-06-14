@@ -14,7 +14,7 @@ import (
 
 // SchemaURL points at the published schema in the repo at the matching
 // version tag. Update when bumping the schema.
-const SchemaURL = "https://raw.githubusercontent.com/skhell/pingtrace/v1.0.0/schema/pingtrace.schema.json"
+const SchemaURL = "https://raw.githubusercontent.com/skhell/pingtrace/v1.1.0/schema/pingtrace.schema.json"
 
 // Target mirrors the JSON Schema Target object.
 type Target struct {
@@ -35,13 +35,16 @@ type Row struct {
 
 	// trace fields
 	Hop      *int     `json:"hop,omitempty"`
-	Host     string   `json:"host,omitempty"`
+	Hostname string   `json:"hostname,omitempty"`
+	HostIp   string   `json:"hostIp,omitempty"`
 	Probe1Ms *float64 `json:"probe1Ms,omitempty"`
 	Probe2Ms *float64 `json:"probe2Ms,omitempty"`
 	Probe3Ms *float64 `json:"probe3Ms,omitempty"`
 
-	// shared
-	IP         string `json:"ip,omitempty"`
+	// shared: present on every row, mirrors the CSV source/target columns
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
+
 	PublicDNS  string `json:"publicDns,omitempty"`
 	PrivateDNS string `json:"privateDns,omitempty"`
 	Org        string `json:"org,omitempty"`
@@ -211,6 +214,8 @@ func pingRow(p probe.PingReply) Row {
 	seq := p.Seq
 	r := Row{
 		Seq:        &seq,
+		Source:     p.Source,
+		Target:     p.Target,
 		Status:     p.Status,
 		PublicDNS:  p.PublicDNS,
 		PrivateDNS: p.PrivateDNS,
@@ -227,9 +232,6 @@ func pingRow(p probe.PingReply) Row {
 		r.Bytes = &bytes
 		r.TTL = &ttl
 		r.TimeMs = &t
-		r.IP = p.IP
-	} else if p.IP != "" {
-		r.IP = p.IP
 	}
 	return r
 }
@@ -238,8 +240,10 @@ func traceRow(h probe.TraceHop) Row {
 	hop := h.Hop
 	r := Row{
 		Hop:        &hop,
-		Host:       h.Host,
-		IP:         h.IP,
+		Source:     h.Source,
+		Target:     h.Target,
+		Hostname:   h.Host,
+		HostIp:     h.IP,
 		Status:     h.Status,
 		PublicDNS:  h.PublicDNS,
 		PrivateDNS: h.PrivateDNS,

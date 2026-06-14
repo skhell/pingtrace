@@ -63,7 +63,7 @@ func TestParsePingLine_Windows(t *testing.T) {
 	}{
 		{"Reply from 1.1.1.1: bytes=32 time=14ms TTL=56", "1.1.1.1", 32, 56, 14},
 		{"Reply from 1.1.1.1: bytes=32 time<1ms TTL=56", "1.1.1.1", 32, 56, 1},
-		{"Reply from 8.8.8.8: bytes=32 time=23ms TTL=117", "8.8.8.8", 32, 117, 23},
+		{"Reply from 1.1.1.1: bytes=32 time=23ms TTL=117", "1.1.1.1", 32, 117, 23},
 	}
 	for _, c := range cases {
 		got, ok := parsePingLine(c.line, 0)

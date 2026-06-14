@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-14
+
+### Added
+- `source` and `target` columns in ping and traceroute tables (CLI and export files). `source` is the local outbound IP resolved via routing-table lookup (no packets sent); `target` is the hostname or IP passed on the command line. Both appear on every row, making multi-target and bulk-mode exports self-describing without needing to cross-reference the filename. When exports from multiple jump hosts are merged into one dataset, rows can be split or filtered by `source`.
+- `--compact-export` flag: omits columns that are entirely empty across all rows from the CSV output. Column set is determined on the first write to each file and held consistent for the rest of the run. Typical use: skips all PeeringDB columns (`net_type`, `policy`, `pdb_name`, `traffic`, `prefixes_v4`, `prefixes_v6`, `ixp_count`) when PeeringDB is not configured, and all ipinfo columns when no token is set.
+- Export filenames now include source and target: `ping_from_<src>_to_<target>_UTC<stamp>.csv` and `trace_from_<src>_to_<target>_UTC<stamp>.csv`. For CIDR/bulk runs the target segment is the sanitized CIDR notation (e.g. `10.0.0.0_24`); for multiple plain targets it is the first value plus a count (`1.1.1.1+2more`). Source is the local outbound IP resolved at startup.
+
+### Changed
+- Ping CSV and CLI column order updated: `seq, bytes, source, target, ttl, time_ms, ...` (was `seq, bytes, ip, ttl, time_ms, ...`). The `ip` column is removed from ping, the `target` column carries the same information.
+- Traceroute CSV and CLI column order updated: `hop, source, target, hostname, host_ip, probe_1_ms, ...` (was `hop, host, ip, probe_1_ms, ...`). The per-hop IP is renamed from `ip` to `host_ip` to distinguish it from the probe target.
+- `host` column renamed to `hostname` in traceroute output (CLI table header and CSV). The value is unchanged - it is still the reverse DNS hostname from the traceroute output.
+- CSV `hostname` column (ipinfo PTR record) renamed to `ipinfo_hostname` to avoid collision with the promoted `hostname` column (traceroute-parsed hostname).
+
 ## [1.0.1] - 2026-06-03
 
 ### Fixed
