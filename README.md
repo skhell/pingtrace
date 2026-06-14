@@ -22,14 +22,36 @@ It's the same probes you already trust (the OS `ping` / `traceroute`) pingtrace 
 
 ---
 
-## Try it in 30 seconds
+## Install
 
-### Install from source
+### macOS
+
+```sh
+brew tap skhell/pingtrace
+brew install pingtrace
+```
+
+### Linux
+
+Download the `.deb` or `.rpm` from the [latest GitHub Release](https://github.com/skhell/pingtrace/releases/latest) and install it:
+
+```sh
+# Debian / Ubuntu
+sudo dpkg -i pingtrace_linux_amd64.deb
+
+# Fedora / RHEL
+sudo rpm -i pingtrace_linux_amd64.rpm
+```
+
+### Any platform (Go toolchain required)
 
 ```sh
 go install github.com/skhell/pingtrace/cmd/pingtrace@latest
-pingtrace help
 ```
+
+---
+
+## Quick start
 
 ```sh
 # the headline command ping + trace + enrichment

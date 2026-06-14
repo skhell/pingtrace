@@ -45,6 +45,21 @@ nfpms:
     bindir: /usr/bin
 
 
+brews:
+  - name: pingtrace
+    repository:
+      owner: skhell
+      name: homebrew-pingtrace
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/skhell/pingtrace
+    description: Cross-platform ping + traceroute + MTR with ipinfo.io, DNS, ASN, and PeeringDB enrichment.
+    license: MIT
+    install: |
+      bin.install "pingtrace"
+    test: |
+      system "#{bin}/pingtrace", "--version"
+
 checksum:
   name_template: checksums.txt
 
