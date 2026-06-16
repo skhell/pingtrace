@@ -5,9 +5,8 @@
 
 ![Pingtrace demo](.github/media/pingtrace.gif "pingtrace demo")
 
-Get a clean, color-coded view of every reply and every hop in a single run enriched with private and public DNS, [ipinfo.io](ipinfo.io) and PeeringDB policies. Easily export the results in CSV and JSON format.
-
----
+`pingtrace` combines ping, traceroute, MTR, TCP service reachability checks, private and public DNS enrichment, [PeeringDB](https://www.peeringdb.com/), [ipinfo](https://ipinfo.io/) context and CSV/JSON export in a single cross-platform CLI.
+It is built for who need fast and exportable answers during incidents without jumping between multiple windows with ping, traceroute, mtr, dig, nmap, spreadsheets and notes.
 
 ## Why pingtrace over the standard tools?
 

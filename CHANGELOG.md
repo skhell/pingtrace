@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.2.1] - 2026-06-16
+
+### Fixed
+- `scan_*.csv` was never written when none of the scanned targets had any open port -
+  `Writer.Scan` returned before opening the file, unlike `Ping`/`Trace` which always
+  create their file. Most visible on bulk/CIDR scans of many hosts: ping and trace CSVs
+  would appear but the scan CSV silently would not. The file (with header) is now always
+  created, even when every row is filtered out for having no open ports.
+
+### Added
+- `--ports`, `--port-timeout`, and `--scan-concurrency` documented under a new "Port scan"
+  section in `pingtrace --help`, plus three `--ports` usage examples (previously missing
+  even though the flags existed and were wired up).
+- `--help` output now paginates with a `-- More --` prompt when run in an interactive
+  terminal shorter than the output, instead of printing everything past the top of the
+  screen.
+
 ## [1.2.0] - 2026-06-16
 
 ### Added
@@ -252,3 +271,12 @@ Minor version bump (rather than patch) because the CSV export schema changed sha
 - Replaced the initial skeleton probe planner with actual command execution and terminal summaries.
 - Made config-store initialization lazy so `help` works without touching the config directory.
 - Resolved `--export` paths against the user's current working directory immediately for predictable output locations.
+
+[Unreleased]: https://github.com/skhell/pingtrace/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/skhell/pingtrace/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/skhell/pingtrace/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/skhell/pingtrace/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/skhell/pingtrace/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/skhell/pingtrace/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/skhell/pingtrace/compare/v0.2.0...v1.0.0
+[0.2.0]: https://github.com/skhell/pingtrace/releases/tag/v0.2.0
