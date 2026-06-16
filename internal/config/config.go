@@ -53,6 +53,15 @@ func Defaults() map[string]any {
 		"dns.private":    "",
 		"dns.timeout_ms": float64(250),
 
+		// Port scan engine defaults.
+		"scan.ports":       "default",     // "default" = all 65535 space; accepts comma list or range
+		"scan.timeout_ms":  float64(1500), // per-port TCP connect timeout
+		"scan.concurrency": float64(50),   // concurrent TCP dials per scan
+
+		// IANA port database.
+		"iana.url":          "https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.csv",
+		"iana.refresh_days": float64(30),
+
 		// Renderer color thresholds.
 		"thresholds.latency.green_ms":  float64(50),
 		"thresholds.latency.yellow_ms": float64(100),
@@ -85,11 +94,13 @@ type KeyMeta struct {
 // interactive TUI. Keys not associated with any category fall under
 // "Other".
 var CategoryOrder = []string{
-	"Tokens & accounts",
-	"DNS resolution",
 	"Ping engine",
 	"Traceroute engine",
+	"Port scan",
 	"MTR engine",
+	"DNS resolution",
+	"Tokens & accounts",
+	"IANA port database",
 	"Color thresholds",
 	"Other",
 }
@@ -177,6 +188,20 @@ func Meta() map[string]KeyMeta {
 			Description: "Number of cycles to run; 0 means continuous.",
 		},
 
+		"scan.ports": {
+			Category:    "Port scan",
+			Description: "Default ports when --ports is given without a value.",
+			Hint:        "Examples: 22,80,443  or  1-1024  or  default (all 65535).",
+		},
+		"scan.timeout_ms": {
+			Category:    "Port scan",
+			Description: "Per-port TCP connect timeout in milliseconds.",
+		},
+		"scan.concurrency": {
+			Category:    "Port scan",
+			Description: "Concurrent TCP dials per scan (higher = faster, more load).",
+		},
+
 		"thresholds.latency.green_ms": {
 			Category:    "Color thresholds",
 			Description: "RTT <= this is colored green (excellent).",
@@ -204,6 +229,16 @@ func Meta() map[string]KeyMeta {
 		"thresholds.loss.red_pct": {
 			Category:    "Color thresholds",
 			Description: "Packet loss % at which to start coloring red (critical).",
+		},
+
+		"iana.url": {
+			Category:    "IANA port database",
+			Description: "URL to fetch the IANA service names CSV from.",
+			Hint:        "Default: https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.csv",
+		},
+		"iana.refresh_days": {
+			Category:    "IANA port database",
+			Description: "Days between sync reminders (0 = never remind).",
 		},
 	}
 }

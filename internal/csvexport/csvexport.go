@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/skhell/pingtrace/internal/portscan"
 	"github.com/skhell/pingtrace/internal/probe"
 )
 
@@ -412,6 +413,65 @@ func fmtProbe(ms float64) string {
 		return ""
 	}
 	return fmt.Sprintf("%.3f", ms)
+}
+
+// --- port scan ------------------------------------------------------
+
+// scanHeaders mirrors the IANA CSV column names exactly to avoid confusion, with source and
+// target prepended so rows are attributable to a probe origin and destination.
+var scanHeaders = []string{
+	"source", "target",
+	"Service Name", "Port Number", "Transport Protocol", "Description",
+	"Assignee", "Contact", "Registration Date", "Modification Date",
+	"Reference", "Service Code", "Unauthorized Use Reported", "Assignment Notes",
+}
+
+// Scan writes one row per open port to scan_*.csv. Closed ports are omitted.
+// source is the local outbound IP; target is the probe destination.
+func (w *Writer) Scan(source, target string, results []portscan.Result) error {
+	open := portscan.OpenOnly(results)
+	if len(open) == 0 {
+		return nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	rows := make([][]string, 0, len(open))
+	for _, r := range open {
+		rows = append(rows, []string{
+			source, target,
+			r.IANA.ServiceName, r.IANA.PortNumber, r.IANA.TransportProtocol,
+			r.IANA.Description, r.IANA.Assignee, r.IANA.Contact,
+			r.IANA.RegistrationDate, r.IANA.ModificationDate,
+			r.IANA.Reference, r.IANA.ServiceCode,
+			r.IANA.UnauthorizedUseReported, r.IANA.AssignmentNotes,
+		})
+	}
+
+	var cf *csvFile
+	var err error
+	if w.compact {
+		cf, err = w.openCompact("scan", scanHeaders, rows)
+	} else {
+		cf, err = w.open("scan", scanHeaders)
+	}
+	if err != nil {
+		return err
+	}
+
+	for _, row := range rows {
+		out := row
+		if cf.activeIdx != nil {
+			out = filterRow(row, cf.activeIdx)
+		}
+		if err := cf.w.Write(out); err != nil {
+			return err
+		}
+		cf.rowCount++
+	}
+	cf.w.Flush()
+	return cf.w.Error()
 }
 
 // --- mtr -------------------------------------------------------

@@ -2,8 +2,12 @@ package render
 
 import (
 	"fmt"
+	"io"
 	"strconv"
 
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/skhell/pingtrace/internal/portscan"
 	"github.com/skhell/pingtrace/internal/probe"
 )
 
@@ -136,6 +140,49 @@ func pickTraceRow(h probe.TraceHop, cols []string) []string {
 		}
 	}
 	return row
+}
+
+// ScanSection prints a "PORTS <target>" table showing every open port
+// found by the TCP connect scan. Closed ports are counted but not listed.
+// In wide mode the IANA description column is included.
+func ScanSection(out io.Writer, target string, results []portscan.Result, wide, noColor bool) {
+	open := portscan.OpenOnly(results)
+	total := len(results)
+	fmt.Fprintln(out, SectionHeading(
+		fmt.Sprintf("PORTS %s  (%d/%d open)", target, len(open), total),
+		noColor,
+	))
+
+	if len(open) == 0 {
+		dim := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+		if noColor {
+			dim = lipgloss.NewStyle()
+		}
+		fmt.Fprintln(out, dim.Render("  no open ports found"))
+		return
+	}
+
+	var headers []string
+	if wide {
+		headers = []string{"port", "proto", "state", "service", "description", "ms"}
+	} else {
+		headers = []string{"port", "proto", "state", "service", "ms"}
+	}
+
+	rows := make([][]string, 0, len(open))
+	for _, r := range open {
+		ms := fmt.Sprintf("%.2f", r.LatencyMs)
+		if wide {
+			rows = append(rows, []string{
+				strconv.Itoa(r.Port), r.Proto, "open", r.IANA.ServiceName, r.IANA.Description, ms,
+			})
+		} else {
+			rows = append(rows, []string{
+				strconv.Itoa(r.Port), r.Proto, "open", r.IANA.ServiceName, ms,
+			})
+		}
+	}
+	writeBorderedTable(out, headers, rows, Options{NoColor: noColor, Out: out})
 }
 
 func formatProbe(t float64, status string) string {
