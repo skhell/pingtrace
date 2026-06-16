@@ -14,7 +14,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/skhell/pingtrace/internal/csvexport"
+	"github.com/skhell/pingtrace/internal/iana"
 	"github.com/skhell/pingtrace/internal/jsonreport"
+	"github.com/skhell/pingtrace/internal/portscan"
 	"github.com/skhell/pingtrace/internal/probe"
 	"github.com/skhell/pingtrace/internal/render"
 	"github.com/skhell/pingtrace/internal/target"
@@ -99,7 +101,7 @@ type bulkSample struct {
 // live progress bar, writes per-packet ping + per-hop trace rows
 // to CSV (same format as single-target runs), and prints a brief
 // leaderboard at the end.
-func runBulk(ctx context.Context, targets []target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
+func runBulk(ctx context.Context, targets []target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers, scanPorts []int, ianaDB iana.DB) error {
 	conc := f.concurrency
 	if conc <= 0 {
 		conc = 8
@@ -166,6 +168,18 @@ func runBulk(ctx context.Context, targets []target.Target, f *rootFlags, pingRen
 					}
 					if jsonW != nil {
 						jsonW.AppendTrace(t.Value, t.Source, traceDur, traceRes)
+					}
+				}
+
+				// Port scan runs regardless of ICMP reachability: a host
+				// can have ping blocked by firewall/policy while still
+				// answering on TCP ports.
+				if len(scanPorts) > 0 {
+					timeout := time.Duration(f.portTimeout) * time.Millisecond
+					scanRes := portscan.Scan(ctx, t.Value, scanPorts, timeout, f.portConcurrency, ianaDB)
+					if csvW != nil {
+						first := firstOK(pingRes)
+						_ = csvW.Scan(first.Source, t.Value, scanRes)
 					}
 				}
 

@@ -17,7 +17,9 @@ import (
 	"github.com/skhell/pingtrace/internal/config"
 	"github.com/skhell/pingtrace/internal/csvexport"
 	"github.com/skhell/pingtrace/internal/enrich"
+	"github.com/skhell/pingtrace/internal/iana"
 	"github.com/skhell/pingtrace/internal/jsonreport"
+	"github.com/skhell/pingtrace/internal/portscan"
 	"github.com/skhell/pingtrace/internal/probe"
 	"github.com/skhell/pingtrace/internal/render"
 	"github.com/skhell/pingtrace/internal/target"
@@ -25,7 +27,7 @@ import (
 )
 
 // Version is overridden at build time via -ldflags.
-var Version = "1.1.0"
+var Version = "1.2.0"
 
 type rootFlags struct {
 	noPing   bool
@@ -54,6 +56,10 @@ type rootFlags struct {
 	jsonOut       bool
 	compactExport bool
 
+	ports           string // "" = no scan, "default" -> scan.ports config, else port spec
+	portTimeout     int    // ms per TCP connect attempt (0 = use scan.timeout_ms)
+	portConcurrency int    // concurrent TCP dials (0 = use scan.concurrency)
+
 	file string
 
 	tables      bool // force per-target tables even for CIDR / large lists
@@ -66,12 +72,13 @@ func newRootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "pingtrace [target...]",
-		Short: "Cross-platform ping + traceroute + MTR with one command.",
-		Long: "pingtrace runs ping and traceroute side by side from one command.\n" +
+		Short: "Cross-platform ping + traceroute + port scan + MTR in one command.",
+		Long: "pingtrace runs ping, traceroute, and TCP port scan from one command.\n" +
 			"Pass one or more targets (comma-separated, IPv4 CIDR, or via --file).\n" +
-			"Use --mtr / -m for live MTR (Ctrl+C to stop).\n\n" +
-			"Engine defaults (count, packet size, timeouts, etc.) can be set\n" +
-			"persistently with `pingtrace config set`. CLI flags override the\n" +
+			"Use --mtr / -m for live MTR (Ctrl+C to stop).\n" +
+			"Use --ports to TCP-scan open ports alongside ping + trace.\n\n" +
+			"Engine defaults (count, packet size, timeouts, port list, etc.) can be\n" +
+			"set persistently with `pingtrace config set`. CLI flags override the\n" +
 			"config file for a single invocation.",
 		Version:       Version,
 		SilenceUsage:  true,
@@ -115,6 +122,11 @@ func newRootCmd() *cobra.Command {
 
 	root.Flags().StringVar(&f.file, "file", "", "Read targets from a CSV file (first column = target).")
 
+	root.Flags().StringVar(&f.ports, "ports", "", "TCP ports to scan: comma list (22,80,443), range (1-1024), or omit value to use scan.ports config.")
+	root.Flags().Lookup("ports").NoOptDefVal = "default"
+	root.Flags().IntVar(&f.portTimeout, "port-timeout", 0, "Per-port TCP connect timeout in ms. Overrides scan.timeout_ms (default 1500).")
+	root.Flags().IntVar(&f.portConcurrency, "scan-concurrency", 0, "Concurrent TCP dials per port scan. Overrides scan.concurrency (default 50).")
+
 	root.Flags().BoolVar(&f.tables, "tables", false, "Force per-target tables (default for ≤4 hosts; CIDR / large lists use bulk mode otherwise).")
 	root.Flags().IntVar(&f.concurrency, "concurrency", 8, "Parallel probes in bulk mode.")
 
@@ -129,22 +141,25 @@ func newRootCmd() *cobra.Command {
 // Execute is the CLI entry point.
 func Execute() error {
 	cmd := newRootCmd()
-	cmd.SetArgs(normalizeExportArgs(os.Args[1:]))
+	cmd.SetArgs(normalizeOptionalFlags(os.Args[1:]))
 	return cmd.Execute()
 }
 
-// normalizeExportArgs lets users write `--export ./reports` or
-// `-e ./reports` even though pflag treats --export as having an
-// optional value. It rewrites the pair to `--export=./reports` so
-// the following positional is not swallowed as a target.
-func normalizeExportArgs(in []string) []string {
+// normalizeOptionalFlags rewrites `--flag value` to `--flag=value` for
+// flags that use NoOptDefVal (optional-value flags). Without this rewrite
+// pflag treats the space-separated value as a positional argument.
+func normalizeOptionalFlags(in []string) []string {
+	optionalFlags := map[string]bool{
+		"--export": true,
+		"--ports":  true,
+	}
 	out := make([]string, 0, len(in))
 	for i := 0; i < len(in); i++ {
 		a := in[i]
-		if a == "--export" && i+1 < len(in) {
+		if optionalFlags[a] && i+1 < len(in) {
 			next := in[i+1]
 			if !strings.HasPrefix(next, "-") {
-				out = append(out, "--export="+next)
+				out = append(out, a+"="+next)
 				i++
 				continue
 			}
@@ -283,7 +298,53 @@ func runRoot(cmd *cobra.Command, args []string, f *rootFlags) error {
 			NoColor: f.noColor || !render.IsTTY(),
 			Out:     cmd.OutOrStdout(),
 		}
-		return runMTR(ctx, targets, f, opts, csvW, jsonW, traceOpts, mtrInterval, mtrCycles)
+		return runMTR(ctx, targets, opts, csvW, jsonW, traceOpts, mtrInterval, mtrCycles)
+	}
+
+	// Parse --ports and load IANA once for the whole run.
+	// Resolve scan engine opts: config defaults < CLI flag overrides.
+	var scanPorts []int
+	var ianaDB iana.DB
+	if f.ports != "" {
+		scanEff, _ := config.Effective()
+		asInt := func(key string) int {
+			if v, ok := scanEff[key].(float64); ok {
+				return int(v)
+			}
+			return 0
+		}
+		// "default" is the NoOptDefVal sentinel: substitute with scan.ports config.
+		portSpec := f.ports
+		if portSpec == "default" {
+			if v, _ := scanEff["scan.ports"].(string); v != "" {
+				portSpec = v
+			}
+		}
+		if !cmd.Flags().Changed("port-timeout") {
+			f.portTimeout = asInt("scan.timeout_ms")
+		}
+		if f.portTimeout <= 0 {
+			f.portTimeout = 1500
+		}
+		if !cmd.Flags().Changed("scan-concurrency") {
+			f.portConcurrency = asInt("scan.concurrency")
+		}
+		if f.portConcurrency <= 0 {
+			f.portConcurrency = 50
+		}
+		scanPorts, err = portscan.ParsePorts(portSpec)
+		if err != nil {
+			return fmt.Errorf("--ports: %w", err)
+		}
+		ianaURL, _ := scanEff["iana.url"].(string)
+		if _, cached := iana.LastSyncTime(); !cached {
+			fmt.Fprintln(cmd.OutOrStdout(), "IANA service database not cached; downloading (first run only)...")
+		}
+		var ianaErr error
+		ianaDB, ianaErr = iana.LoadEffective(ianaURL)
+		if ianaErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v; ports will show without service names\n", ianaErr)
+		}
 	}
 
 	enr := buildEnrichers()
@@ -301,9 +362,9 @@ func runRoot(cmd *cobra.Command, args []string, f *rootFlags) error {
 	traceRenderOpts.DefaultColumns = filterDNSColumns(render.TraceAllColumns, hasPublicDNS, hasPrivateDNS)
 
 	if useBulk {
-		return runBulk(ctx, targets, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr)
+		return runBulk(ctx, targets, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr, scanPorts, ianaDB)
 	}
-	return runPingTrace(ctx, targets, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr)
+	return runPingTrace(ctx, targets, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr, scanPorts, ianaDB)
 }
 
 // finalizeWriters closes csvW (so file paths/row counts are stable),
@@ -553,13 +614,13 @@ func enrichHop(ctx context.Context, h *probe.TraceHop, enr enrichers) {
 	}
 }
 
-func runPingTrace(ctx context.Context, targets []target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
+func runPingTrace(ctx context.Context, targets []target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers, scanPorts []int, ianaDB iana.DB) error {
 	for i, t := range targets {
 		if i > 0 {
 			fmt.Fprintln(pingRenderOpts.Out)
 			fmt.Fprintln(pingRenderOpts.Out, strings.Repeat("-", 60))
 		}
-		if err := pingTraceOne(ctx, t, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr); err != nil {
+		if err := pingTraceOne(ctx, t, f, pingRenderOpts, traceRenderOpts, csvW, jsonW, pingOpts, traceOpts, enr, scanPorts, ianaDB); err != nil {
 			fmt.Fprintf(pingRenderOpts.Out, "%s: %v\n", t.Value, err)
 		}
 	}
@@ -571,7 +632,7 @@ func runPingTrace(ctx context.Context, targets []target.Target, f *rootFlags, pi
 // flushed as replies arrive), trace prints after. Trace is started
 // at t=0 in the background so its first hops are ready by the time
 // the ping section finishes.
-func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers) error {
+func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRenderOpts, traceRenderOpts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, pingOpts probe.PingOptions, traceOpts probe.TraceOptions, enr enrichers, scanPorts []int, ianaDB iana.DB) error {
 	target := tgt.Value
 	// For ping, further filter DNS columns based on the target IP: a private
 	// target will never populate public_dns and a public target will never
@@ -611,6 +672,10 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRend
 		}
 	}
 
+	// firstEnriched captures the first successful ping reply; it carries
+	// the enrichment data (ipinfo, PeeringDB) reused in the scan CSV row.
+	var firstEnriched *probe.PingReply
+
 	if !f.noPing {
 		evCh, doneCh, err := probe.PingStream(ctx, target, pingOpts)
 		if err != nil {
@@ -631,6 +696,9 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRend
 				}
 				res := <-doneCh
 				res.Packets = enrichedPackets
+				if p := firstOKReply(res.Packets); p != nil {
+					firstEnriched = p
+				}
 				prog.Stop()
 				render.PingStreamFooter(pingRenderOpts.Out, res)
 				durMs := time.Since(pingStart).Milliseconds()
@@ -654,6 +722,9 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRend
 				}
 				res := <-doneCh
 				res.Packets = enrichedPackets
+				if p := firstOKReply(res.Packets); p != nil {
+					firstEnriched = p
+				}
 				st.Close()
 				render.PingStreamFooter(pingRenderOpts.Out, res)
 				durMs := time.Since(pingStart).Milliseconds()
@@ -665,6 +736,19 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRend
 				}
 			}
 		}
+	}
+
+	// Kick off port scan concurrently while trace is printing (or right
+	// after ping if trace is disabled).
+	type scanCollect struct{ results []portscan.Result }
+	var scanCh chan scanCollect
+	if len(scanPorts) > 0 {
+		scanCh = make(chan scanCollect, 1)
+		go func() {
+			timeout := time.Duration(f.portTimeout) * time.Millisecond
+			results := portscan.Scan(ctx, target, scanPorts, timeout, f.portConcurrency, ianaDB)
+			scanCh <- scanCollect{results}
+		}()
 	}
 
 	if tc != nil {
@@ -719,10 +803,39 @@ func pingTraceOne(ctx context.Context, tgt target.Target, f *rootFlags, pingRend
 			}
 		}
 	}
+	// Print port scan results (waited until after ping+trace so the
+	// section appears at the bottom, not mid-stream).
+	if scanCh != nil {
+		prog := render.NewProgress(pingRenderOpts.Out,
+			fmt.Sprintf("scanning %d ports on %s", len(scanPorts), target),
+			pingRenderOpts.NoColor)
+		prog.Start()
+		sc := <-scanCh
+		prog.Stop()
+		fmt.Fprintln(pingRenderOpts.Out)
+		render.ScanSection(pingRenderOpts.Out, target, sc.results, f.wide, pingRenderOpts.NoColor)
+		if csvW != nil {
+			src := ""
+			if firstEnriched != nil {
+				src = firstEnriched.Source
+			}
+			_ = csvW.Scan(src, target, sc.results)
+		}
+	}
 	return nil
 }
 
-func runMTR(ctx context.Context, targets []target.Target, f *rootFlags, opts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, traceOpts probe.TraceOptions, interval time.Duration, cycles int) error {
+// firstOKReply returns a pointer to the first successful ping reply, or nil.
+func firstOKReply(packets []probe.PingReply) *probe.PingReply {
+	for i := range packets {
+		if packets[i].Status == "ok" {
+			return &packets[i]
+		}
+	}
+	return nil
+}
+
+func runMTR(ctx context.Context, targets []target.Target, opts render.Options, csvW *csvexport.Writer, jsonW *jsonreport.Writer, traceOpts probe.TraceOptions, interval time.Duration, cycles int) error {
 	if len(targets) > 1 {
 		for i, t := range targets {
 			if i > 0 {
