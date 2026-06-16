@@ -36,7 +36,7 @@ func newConfigCmd() *cobra.Command {
 			if !render.IsTTY() {
 				return cmd.Help()
 			}
-			return configtui.Run()
+			return configtui.Run(Version, "https://github.com/skhell/pingtrace")
 		},
 	}
 

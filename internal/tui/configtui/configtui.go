@@ -53,15 +53,18 @@ type model struct {
 	syncing    bool
 	width      int
 	height     int
+	version    string
+	url        string
 }
 
 // Run launches the interactive editor. Returns on quit or error.
-func Run() error {
+// version and url are displayed under the title bar.
+func Run(version, url string) error {
 	eff, err := config.Effective()
 	if err != nil {
 		return err
 	}
-	m := initialModel(eff)
+	m := initialModel(eff, version, url)
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
@@ -108,7 +111,7 @@ func buildTabs() []tabData {
 	return tabs
 }
 
-func initialModel(eff map[string]any) model {
+func initialModel(eff map[string]any, version, url string) model {
 	ti := textinput.New()
 	ti.Prompt = ""
 	ti.CharLimit = 256
@@ -119,6 +122,8 @@ func initialModel(eff map[string]any) model {
 		tabCursors: make(map[int]int),
 		values:     eff,
 		input:      ti,
+		version:    version,
+		url:        url,
 	}
 }
 
@@ -416,8 +421,16 @@ func (m model) renderTabBar() string {
 func (m model) View() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("pingtrace config"))
-	b.WriteString("\n\n")
+	title := "pingtrace config"
+	if m.version != "" {
+		title += "  " + hintStyle.Render("v"+m.version)
+	}
+	b.WriteString(titleStyle.Render(title))
+	b.WriteString("\n")
+	if m.url != "" {
+		b.WriteString(urlStyle.Render(m.url) + "\n")
+	}
+	b.WriteString("\n")
 	b.WriteString(m.renderTabBar())
 	b.WriteString("\n\n")
 
@@ -431,10 +444,10 @@ func (m model) View() string {
 		}
 	}
 
-	// Overhead: title(1) + blank(1) + tabbar(1) + blank(1) +
-	//           detail panel(~4) + hints(1) + status/err(1) = ~10
+	// Overhead: title(1) + url(1) + blank(1) + tabbar(1) + blank(1) +
+	//           detail panel(~4) + hints(1) + status/err(1) = ~11
 	// Add 3 more in edit mode for the input block.
-	overhead := 10
+	overhead := 11
 	if m.mode == modeEdit {
 		overhead += 3
 	}
