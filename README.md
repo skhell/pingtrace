@@ -17,6 +17,7 @@ Get a clean, color-coded view of every reply and every hop in a single run enric
 | `dig +short` for every hop | reverse DNS resolved automatically, with optional **private DNS** for internal hops |
 | `for ip in $(seq …)` loops | simply `pingtrace 10.0.0.0/24` or `--file targets.csv` |
 | copy/paste into a spreadsheet or note | `--export ./reports` writes timestamped UTC CSVs and `pingtrace 10.0.0.0/21` do it by default; add `--json` for a schema-validated JSON report alongside |
+| `nmap` / `masscan` for port reachability | `--ports` TCP connect scan, no root required, IANA service names auto-resolved |
 
 It's the same probes you already trust (the OS `ping` / `traceroute`) pingtrace just runs them with no additional latency overhead, parallelize requests for faster CIDR resolution, decorates outputs for clear cross-platform readability including export.
 
@@ -33,7 +34,7 @@ brew install pingtrace
 
 ### Linux
 
-Download the `.deb` or `.rpm` from the [latest GitHub Release](https://github.com/skhell/pingtrace/releases/latest) and install it:
+Download the `.deb` or `.rpm` from the [latest GitHub Release](https://github.com/skhell/pingtrace/releases/latest):
 
 ```sh
 # Debian / Ubuntu
@@ -77,6 +78,17 @@ pingtrace --file ./targets.csv
 
 # script-friendly: pick your columns
 pingtrace 1.1.1.1 --no-trace --columns seq,ip,time_ms,status
+
+# TCP port scan (all 65535 ports) with IANA service name enrichment
+pingtrace 10.0.0.1 --ports
+pingtrace 10.0.0.0/28 --ports
+pingtrace domain.com --ports
+
+# scan specific ports or ranges with IANA service name enrichment
+pingtrace 10.0.0.1 --ports 22,80,443,8000-9000
+
+# CIDR port scan + export to CSV with IANA service name enrichment
+pingtrace 10.0.0.0/28 --ports --export ./reports
 ```
 
 Run `pingtrace --help` for the grouped, color-coded flag reference, and `pingtrace config` to open an interactive TUI for tokens, DNS, and thresholds.
@@ -95,6 +107,7 @@ Run `pingtrace --help` for the grouped, color-coded flag reference, and `pingtra
 - Private DNS enrichment is automatically skipped if the configured server does not respond within 5 seconds.
 - `--json` writes a sibling JSON report (`probe_...json` for ping/trace runs, `mtr_<target>_...json` per MTR target) into the same directory as `--export`, or the current working directory when `--export` is omitted. The document validates against [`schema/pingtrace.schema.json`](schema/pingtrace.schema.json) and lists any CSVs written in its `exportedFiles` section.
 - PeeringDB and ipinfo.io enrichment is skipped for private/RFC-1918 IP addresses.
+- `--ports` runs a TCP connect scan (no raw sockets, no root/admin required). On first use, pingtrace auto-downloads the IANA service-names registry and caches it in the user config directory. Subsequent runs use the cache. The scan still works without the registry - ports will display without service names if the download fails. Use `pingtrace config` to manually sync the IANA database or adjust the download URL in case it change.
 
 ## Feedback
 

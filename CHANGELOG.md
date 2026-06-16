@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-16
+
+### Added
+- `--ports` new flag for TCP connect port scanning. Accepts a comma list (`22,80,443`),
+  a range (`1-1024`), or no value to scan all 65535 ports. No raw sockets, no root
+  required; works identically on Linux, macOS, and Windows.
+- IANA service name enrichment: port names and descriptions are resolved from the IANA
+  service-names registry. The CSV is downloaded automatically from iana.org on first
+  `--ports` use and cached in the user config directory. Subsequent runs load from cache
+  with no network call. No CSV is bundled in the binary.
+- `scan_from_<src>_to_<target>_UTC<stamp>.csv` written when
+  `--export` is active. One row per open port; closed ports are omitted. Column headers
+  match the IANA registry verbatim: `source, target, Service Name, Port Number, Transport
+  Protocol, Description, Assignee, Contact, Registration Date, Modification Date,
+  Reference, Service Code, Unauthorized Use Reported, Assignment Notes`.
+- `PORTS <target> (N/M open)` section in terminal output after ping and trace. `--wide`
+  adds the IANA description column.
+- Scan runs concurrently with traceroute in single-target mode; results appear below trace
+  after both finish. A progress spinner shows `scanning N ports on <target>` while in
+  flight.
+- Bulk / CIDR mode: scan runs for every target regardless of ICMP reachability,
+  so hosts with ping blocked but TCP ports open are still detected.
+- `--port-timeout N` per-TCP-connect timeout in ms. Overrides `scan.timeout_ms`
+  (default 1500).
+- `--scan-concurrency N` concurrent TCP dials per scan. Overrides `scan.concurrency`
+  (default 50).
+- Three new config keys: `scan.ports` (default port spec when `--ports` has no value),
+  `scan.timeout_ms` (TCP connect timeout), `scan.concurrency` (parallel dials).
+- `iana.url` and `iana.refresh_days` config keys for the IANA CSV source URL and
+  cache-age reminder.
+- IANA sync button in the config TUI (IANA tab): press Enter to download the latest CSV
+  from `iana.url`. Shows last-synced timestamp or `no local cache` when absent.
+- `pingtrace config` TUI redesigned with a tabbed layout:
+  `Ping | Trace | Scan | MTR | DNS | API | IANA | Colors | Other`. Active tab is bold
+  and underlined; `left` / `right` (or `h` / `l`) switches tabs. Cursor position is
+  remembered per tab when switching back. Tab bar scrolls on narrow terminals with
+  `< >` indicators so the active tab is always reachable.
+
 ## [1.1.1] - 2026-06-14
 
 ### Added
