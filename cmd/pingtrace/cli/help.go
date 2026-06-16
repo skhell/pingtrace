@@ -1,14 +1,20 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"golang.org/x/term"
+
+	"github.com/skhell/pingtrace/internal/render"
 )
 
 // flagGroups maps each flag name (long form) to a help category.
@@ -49,6 +55,11 @@ var flagGroups = map[string]string{
 	"tables":         "Bulk mode",
 	"concurrency":    "Bulk mode",
 
+	// Port scan
+	"ports":            "Port scan",
+	"port-timeout":     "Port scan",
+	"scan-concurrency": "Port scan",
+
 	// Misc (auto-added by cobra)
 	"help":    "Misc",
 	"version": "Misc",
@@ -59,6 +70,7 @@ var groupOrder = []string{
 	"Operations",
 	"Ping engine",
 	"Trace engine",
+	"Port scan",
 	"Output",
 	"Export",
 	"Bulk mode",
@@ -81,13 +93,17 @@ var helpExamples = []struct {
 	{"pingtrace 1.1.1.1 --export ./reports --json", "write CSV + JSON report (schema-validated) to ./reports"},
 	{"pingtrace 1.1.1.1 --export ./reports --compact-export", "CSV with no empty columns (e.g. skips PeeringDB columns when not configured)"},
 	{"pingtrace 1.1.1.1 --columns seq,ip,time_ms,status", "render only the listed columns"},
+	{"pingtrace 10.0.0.1 --ports", "TCP connect scan, all 65535 ports, IANA service names"},
+	{"pingtrace 10.0.0.1 --ports 22,80,443,8000-9000", "scan specific ports / ranges"},
+	{"pingtrace 10.0.0.0/28 --ports --export ./reports", "CIDR port scan, exported to CSV"},
 	{"pingtrace config", "interactive TUI to edit defaults & API tokens"},
 	{"pingtrace 1.1.1.1 --summary", "skip the table; print only the one-line summary"},
 	{"pingtrace completion zsh > _pingtrace", "generate a zsh completion script"},
 }
 
 func styledHelp(cmd *cobra.Command, _ []string) {
-	out := cmd.OutOrStdout()
+	var buf bytes.Buffer
+	out := &buf
 	noColor := false
 	if v, _ := cmd.Flags().GetBool("no-color"); v {
 		noColor = true
@@ -164,6 +180,44 @@ func styledHelp(cmd *cobra.Command, _ []string) {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, dim.Render("  Tip: run `pingtrace config` for an interactive setup (DNS, ipinfo, PeeringDB, thresholds)."))
 		fmt.Fprintln(out)
+	}
+
+	writePaged(cmd.OutOrStdout(), buf.String())
+}
+
+// writePaged prints content to out, pausing with a "-- More --" prompt
+// between screenfuls when stdin/stdout are an interactive terminal and the
+// content is taller than the terminal. Falls back to a single unpaginated
+// write for piped/redirected output (e.g. `pingtrace --help | grep ...`).
+func writePaged(out io.Writer, content string) {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+
+	height := 0
+	if render.IsTTY() && term.IsTerminal(int(os.Stdin.Fd())) {
+		if _, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+			height = h
+		}
+	}
+
+	if height <= 1 || len(lines) <= height {
+		fmt.Fprintln(out, strings.Join(lines, "\n"))
+		return
+	}
+
+	pageSize := height - 1
+	reader := bufio.NewReader(os.Stdin)
+	for i := 0; i < len(lines); i += pageSize {
+		end := min(i+pageSize, len(lines))
+		fmt.Fprintln(out, strings.Join(lines[i:end], "\n"))
+		if end >= len(lines) {
+			break
+		}
+		fmt.Fprint(out, "-- More -- (Enter to continue, q to quit) ")
+		line, _ := reader.ReadString('\n')
+		fmt.Fprint(out, "\r\033[K")
+		if strings.TrimSpace(strings.ToLower(line)) == "q" {
+			return
+		}
 	}
 }
 
