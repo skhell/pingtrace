@@ -426,13 +426,12 @@ var scanHeaders = []string{
 	"Reference", "Service Code", "Unauthorized Use Reported", "Assignment Notes",
 }
 
-// Scan writes one row per open port to scan_*.csv. Closed ports are omitted.
+// Scan writes one row per open port to scan_*.csv. Closed ports are
+// omitted, but the file (with header) is still created even when a
+// target has no open ports, matching Ping/Trace's always-create behavior.
 // source is the local outbound IP; target is the probe destination.
 func (w *Writer) Scan(source, target string, results []portscan.Result) error {
 	open := portscan.OpenOnly(results)
-	if len(open) == 0 {
-		return nil
-	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
